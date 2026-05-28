@@ -1,12 +1,32 @@
 import type {
   GenerationMode,
   GenerateImageToolArgs,
-  GenerateImageToolResult
+  GenerateImageToolResult,
+  ImageToolAction
 } from "../agent/types.js"
 
 type TargetSize = {
   width: number
   height: number
+}
+
+type CreateTaskPayload = {
+  user: {
+    idx: string
+  }
+  task_type: string
+  args: Record<string, unknown>
+}
+
+type RunImageTaskOptions = {
+  createPayload: CreateTaskPayload
+  toolAction: ImageToolAction
+  generationMode?: GenerationMode
+  taskType: string
+  pollIntervalMs?: number
+  maxPollCount?: number
+  maxCreateRetries?: number
+  createTimeoutMs?: number
 }
 
 type CreateTaskResponse = {
@@ -189,11 +209,19 @@ function extractImages(response: QueryTaskResponse): string[] {
     )
   }
 
+  const cleanBgResults = response.result?.results_clean_bg
+
+  if (Array.isArray(cleanBgResults)) {
+    return cleanBgResults.filter(
+      (item): item is string => typeof item === "string" && item.length > 0
+    )
+  }
+
   const resultsV2 = response.result?.results_v2
 
   if (Array.isArray(resultsV2)) {
     return resultsV2
-      .map((item) => item?.output?.image)
+      .map((item) => item?.output?.clean_bg ?? item?.output?.image)
       .filter(
         (item): item is string => typeof item === "string" && item.length > 0
       )
@@ -363,7 +391,7 @@ export async function generateImageService(
   const finalPrompt = args.prompt
   const customerPrompt = args.customerPrompt ?? args.prompt
 
-  const createPayload = {
+  const createPayload: CreateTaskPayload = {
     user: {
       idx: userIdx
     },
@@ -381,16 +409,111 @@ export async function generateImageService(
     }
   }
 
+  return runImageTask({
+    createPayload,
+    toolAction: "generate_image",
+    generationMode,
+    taskType,
+    pollIntervalMs: args.pollIntervalMs,
+    maxPollCount: args.maxPollCount,
+    maxCreateRetries: args.maxCreateRetries,
+    createTimeoutMs: args.createTimeoutMs
+  })
+}
+
+export async function superResolutionService(args: {
+  imageBase64: string
+  userIdx?: string
+  pollIntervalMs?: number
+  maxPollCount?: number
+  maxCreateRetries?: number
+  createTimeoutMs?: number
+}): Promise<GenerateImageToolResult> {
+  if (!args.imageBase64.startsWith("data:image/")) {
+    throw new Error("super_resolution requires imageBase64 as a data URL.")
+  }
+
+  const userIdx = args.userIdx ?? process.env.IMAGE_USER_IDX ?? "l00423136"
+  const createPayload: CreateTaskPayload = {
+    user: {
+      idx: userIdx
+    },
+    task_type: "magnify",
+    args: {
+      mode: "super_resolution",
+      image_base64: args.imageBase64
+    }
+  }
+
+  return runImageTask({
+    createPayload,
+    toolAction: "super_resolution",
+    taskType: "magnify",
+    pollIntervalMs: args.pollIntervalMs,
+    maxPollCount: args.maxPollCount,
+    maxCreateRetries: args.maxCreateRetries,
+    createTimeoutMs: args.createTimeoutMs
+  })
+}
+
+export async function cutoutImageService(args: {
+  imageBase64: string
+  userIdx?: string
+  pollIntervalMs?: number
+  maxPollCount?: number
+  maxCreateRetries?: number
+  createTimeoutMs?: number
+}): Promise<GenerateImageToolResult> {
+  if (!args.imageBase64.startsWith("data:image/")) {
+    throw new Error("cutout requires imageBase64 as a data URL.")
+  }
+
+  const userIdx = args.userIdx ?? process.env.IMAGE_USER_IDX ?? "l00423136"
+  const createPayload: CreateTaskPayload = {
+    user: {
+      idx: userIdx
+    },
+    task_type: "remove_bg",
+    args: {
+      num_image: 1,
+      image_list: [
+        {
+          mode: "new",
+          image_base64: args.imageBase64
+        }
+      ]
+    }
+  }
+
+  return runImageTask({
+    createPayload,
+    toolAction: "cutout",
+    taskType: "remove_bg",
+    pollIntervalMs: args.pollIntervalMs,
+    maxPollCount: args.maxPollCount,
+    maxCreateRetries: args.maxCreateRetries,
+    createTimeoutMs: args.createTimeoutMs
+  })
+}
+
+async function runImageTask(
+  options: RunImageTaskOptions
+): Promise<GenerateImageToolResult> {
+  const createTaskUrl = process.env.IMAGE_CREATE_TASK_URL ?? "https://xx/create_task"
+  const queryTaskBaseUrl =
+    process.env.IMAGE_QUERY_TASK_BASE_URL ??
+    "https://octoai-api.ucd.huawei.com/octoai-web-api/prod/aiImageGeneration/query_task"
+
   const createJson = await createTaskWithRetry(
     createTaskUrl,
-    createPayload,
-    args.maxCreateRetries ?? 3,
-    args.createTimeoutMs ?? 30000
+    options.createPayload,
+    options.maxCreateRetries ?? 3,
+    options.createTimeoutMs ?? 30000
   )
 
   const taskId = getTaskId(createJson)
-  const pollIntervalMs = args.pollIntervalMs ?? 2000
-  const maxPollCount = args.maxPollCount ?? 60
+  const pollIntervalMs = options.pollIntervalMs ?? 2000
+  const maxPollCount = options.maxPollCount ?? 60
   let lastQueryJson: QueryTaskResponse | null = null
 
   for (let i = 1; i <= maxPollCount; i++) {
@@ -405,8 +528,9 @@ export async function generateImageService(
       return {
         ok: true,
         taskId,
-        generationMode,
-        taskType,
+        toolAction: options.toolAction,
+        generationMode: options.generationMode,
+        taskType: options.taskType,
         status,
         progress,
         images,
@@ -425,8 +549,9 @@ export async function generateImageService(
         [
           "Image generation task failed.",
           `taskId=${taskId}`,
-          `generationMode=${generationMode}`,
-          `taskType=${taskType}`,
+          `toolAction=${options.toolAction}`,
+          `generationMode=${options.generationMode ?? ""}`,
+          `taskType=${options.taskType}`,
           `status=${status}`,
           `progress=${progress}`,
           `response=${JSON.stringify(queryJson, null, 2)}`
@@ -440,8 +565,9 @@ export async function generateImageService(
   return {
     ok: false,
     taskId,
-    generationMode,
-    taskType,
+    toolAction: options.toolAction,
+    generationMode: options.generationMode,
+    taskType: options.taskType,
     status: "poll_timeout",
     message: `Task was created but did not finish after ${maxPollCount} polls.`,
     lastResult: lastQueryJson

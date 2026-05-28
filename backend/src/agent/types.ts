@@ -1,5 +1,12 @@
 export type GenerationMode = "txt2img" | "img2img"
 
+export type ImageToolAction =
+  | "generate_image"
+  | "super_resolution"
+  | "cutout"
+  | "chat"
+  | "prompt_only"
+
 export type ImageSessionState = {
   sessionId: string
   currentPrompt?: string
@@ -32,6 +39,7 @@ export type AgentIntent =
   | "chat"
 
 export type AgentPlan = {
+  toolAction: ImageToolAction
   intent: AgentIntent
   generationMode: GenerationMode
   shouldCallTool: boolean
@@ -44,6 +52,7 @@ export type AgentPlan = {
   lighting?: string
   colorPalette?: string
   usePreviousImage: boolean
+  requiresImage?: boolean
   reason: string
 }
 
@@ -70,6 +79,7 @@ export type GenerateImageToolArgs = {
 export type GenerateImageToolResult = {
   ok: boolean
   taskId?: string
+  toolAction?: ImageToolAction
   generationMode?: GenerationMode
   taskType?: string
   status?: string | number

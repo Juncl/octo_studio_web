@@ -53,12 +53,15 @@ type AgentApiResponse = {
   ok: boolean
   type?: "chat" | "image_result" | "prompt_updated" | "error"
   text?: string
+  toolAction?: ImageToolAction
   images?: string[]
   primaryImage?: string | null
   taskId?: string
   error?: string
   state?: Partial<ClientAgentState>
 }
+
+type ImageToolAction = "generate_image" | "super_resolution" | "cutout"
 
 type ComposerMenu = "mode" | "style" | "settings"
 
@@ -267,6 +270,15 @@ const selectedAspectId = computed(() => {
   )
 })
 const selectedImageCount = computed(() => activeAgentState.value?.numImage ?? 2)
+const canSubmit = computed(() => {
+  if (loading.value || !activeConversation.value) return false
+
+  if (selectedComposerModeId.value === "upscale" || selectedComposerModeId.value === "cutout") {
+    return Boolean(currentPreview.value)
+  }
+
+  return Boolean(input.value.trim())
+})
 const detailStyleTags = computed(() => {
   const tags = [
     selectedComposerMode.value.label,
@@ -643,6 +655,9 @@ async function sendImageAgentMessage(inputValue: {
   sessionId: string
   message: string
   clientState: ClientAgentState
+  composerMode?: string
+  requestedToolAction?: ImageToolAction
+  imageBase64?: string
 }): Promise<AgentApiResponse> {
   const response = await fetch("/api/agent/image", {
     method: "POST",
@@ -757,9 +772,60 @@ function handleSelectImageCount(count: number) {
 }
 
 async function handleSubmit() {
-  const text = input.value.trim()
+  const isUpscaleMode = selectedComposerModeId.value === "upscale"
+  const isCutoutMode = selectedComposerModeId.value === "cutout"
+  const text = input.value.trim() || (isUpscaleMode ? "变清晰" : isCutoutMode ? "抠图" : "")
+
+  await submitAgentRequest({
+    text,
+    composerMode: selectedComposerModeId.value,
+    requestedToolAction: isUpscaleMode
+      ? "super_resolution"
+      : isCutoutMode
+        ? "cutout"
+        : undefined
+  })
+}
+
+async function handleToolAction(action: ImageToolAction) {
+  const label =
+    action === "super_resolution" ? "变清晰" : action === "cutout" ? "抠图" : "处理图片"
+
+  await submitAgentRequest({
+    text: input.value.trim() || label,
+    composerMode:
+      action === "super_resolution"
+        ? "upscale"
+        : action === "cutout"
+          ? "cutout"
+          : selectedComposerModeId.value,
+    requestedToolAction: action
+  })
+}
+
+async function submitAgentRequest(options: {
+  text: string
+  composerMode?: string
+  requestedToolAction?: ImageToolAction
+}) {
+  const text = options.text.trim()
 
   if (!text || loading.value || !activeConversation.value) return
+
+  let imageBase64: string | undefined
+
+  try {
+    if (
+      options.requestedToolAction === "super_resolution" ||
+      options.requestedToolAction === "cutout"
+    ) {
+      imageBase64 = await getCurrentPreviewBase64()
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    window.alert(message)
+    return
+  }
 
   const requestConversation = normalizeConversation(activeConversation.value)
   const requestClientState = toClientAgentState(requestConversation)
@@ -806,7 +872,10 @@ async function handleSubmit() {
     const result = await sendImageAgentMessage({
       sessionId: requestConversation.id,
       message: text,
-      clientState: requestClientState
+      clientState: requestClientState,
+      composerMode: options.composerMode,
+      requestedToolAction: options.requestedToolAction,
+      imageBase64
     })
 
     const nextImages = result.images ?? []
@@ -886,6 +955,51 @@ async function handleSubmit() {
   } finally {
     loading.value = false
   }
+}
+
+async function getCurrentPreviewBase64(): Promise<string> {
+  const preview = currentPreview.value
+
+  if (!preview) {
+    throw new Error("请先选择一张需要变清晰的图片。")
+  }
+
+  if (preview.startsWith("data:image/")) {
+    return preview
+  }
+
+  try {
+    const response = await fetch(preview)
+
+    if (!response.ok) {
+      throw new Error(`图片读取失败：${response.status}`)
+    }
+
+    const blob = await response.blob()
+
+    return await blobToDataUrl(blob)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+
+    throw new Error(`当前图片无法转换为 base64：${message}`)
+  }
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result)
+        return
+      }
+
+      reject(new Error("图片 base64 读取失败。"))
+    }
+    reader.onerror = () => reject(reader.error ?? new Error("图片 base64 读取失败。"))
+    reader.readAsDataURL(blob)
+  })
 }
 
 function startTypewriter(messageId: string, fullText: string) {
@@ -1312,7 +1426,7 @@ watch(
             <button
               class="welcome-send"
               type="button"
-              :disabled="loading || !input.trim()"
+              :disabled="!canSubmit"
               @click="handleSubmit"
             >
               <span v-if="loading" class="send-spinner" />
@@ -1397,7 +1511,7 @@ watch(
                 v-if="message.imageUrls && message.imageUrls.length > 0"
                 class="generated-card"
               >
-                <div class="generated-label">▧ 图片生成</div>
+                <div class="generated-label">图片生成</div>
                 <div class="generated-title">
                   {{ getGeneratedTitle(message) }}
                 </div>
@@ -1560,16 +1674,6 @@ watch(
                 placeholder="上传参考图、输入文字，描述你想生成的图片。"
                 @keydown="handleKeyDown"
               />
-
-              <button
-                class="workspace-send"
-                type="button"
-                :disabled="loading || !input.trim()"
-                @click="handleSubmit"
-              >
-                <span v-if="loading" class="send-spinner" />
-                <span v-else class="workspace-send-icon">➤</span>
-              </button>
             </div>
 
             <div class="workspace-toolbar">
@@ -1613,6 +1717,12 @@ watch(
               >
                 <span class="workspace-toolbar-icon">▣</span>
               </button>
+              <button
+                class="workspace-send"
+                type="button"
+                :disabled="!canSubmit"
+                @click="handleSubmit"
+              />
             </div>
           </div>
         </div>
@@ -1627,20 +1737,12 @@ watch(
         </header>
 
         <div class="canvas-stage">
-          <div v-if="images.length > 0" :class="getPreviewGridClass()">
-            <button
-              v-for="(url, index) in images"
-              :key="url"
-              type="button"
-              :class="currentPreview === url ? 'preview-card active' : 'preview-card'"
-              @click="selectedPreview = url"
-            >
-              <img
-                :src="url"
-                :alt="`生成图片 ${index + 1}`"
-                class="preview-grid-image"
-              />
-            </button>
+          <div v-if="currentPreview" class="selected-preview-card">
+            <img
+              :src="currentPreview"
+              :alt="`当前预览图片 ${getCurrentPreviewIndex()}`"
+              class="selected-preview-image"
+            />
           </div>
 
           <div v-else class="empty-canvas">
@@ -1664,12 +1766,27 @@ watch(
 
       <aside class="detail-panel">
         <div class="detail-cover">
-          <img
-            v-if="currentPreview"
-            class="detail-cover-image"
-            :src="currentPreview"
-            alt="生成图预览"
-          />
+          <template v-if="images.length > 0">
+            <button
+              v-for="(url, index) in images"
+              :key="url"
+              type="button"
+              :class="
+                currentPreview === url
+                  ? 'detail-preview-switch-button active'
+                  : 'detail-preview-switch-button'
+              "
+              :aria-label="`预览第 ${index + 1} 张图片`"
+              :aria-pressed="currentPreview === url"
+              @click="selectedPreview = url"
+            >
+              <img
+                :src="url"
+                :alt="`生成图片 ${index + 1}`"
+                class="detail-preview-switch-image"
+              />
+            </button>
+          </template>
           <div v-else class="detail-empty">暂无图片</div>
         </div>
 
@@ -1717,14 +1834,28 @@ watch(
               }
             "
           >
-            ✨ 再次生成
+            再次生成
           </button>
 
           <div class="detail-action-grid">
-            <button class="detail-upscale-button" type="button">▱ 变清晰</button>
-            <button class="detail-cutout-button" type="button">◎ 抠图</button>
-            <button class="detail-inpaint-button" type="button">◒ 局部重绘</button>
-            <button class="detail-outpaint-button" type="button">⛶ 扩图</button>
+            <button
+              class="detail-upscale-button"
+              type="button"
+              :disabled="loading || !currentPreview"
+              @click="handleToolAction('super_resolution')"
+            >
+              变清晰
+            </button>
+            <button
+              class="detail-cutout-button"
+              type="button"
+              :disabled="loading || !currentPreview"
+              @click="handleToolAction('cutout')"
+            >
+              抠图
+            </button>
+            <button class="detail-inpaint-button" type="button">局部重绘</button>
+            <button class="detail-outpaint-button" type="button">扩图</button>
           </div>
         </section>
 

@@ -5,7 +5,14 @@ export const agentImageRouter = Router()
 
 agentImageRouter.post("/", async (req, res, next) => {
   try {
-    const { sessionId, message, clientState } = req.body ?? {}
+    const {
+      sessionId,
+      message,
+      clientState,
+      composerMode,
+      requestedToolAction,
+      imageBase64
+    } = req.body ?? {}
 
     if (!sessionId || typeof sessionId !== "string") {
       res.status(400).json({ ok: false, error: "Missing sessionId" })
@@ -19,7 +26,13 @@ agentImageRouter.post("/", async (req, res, next) => {
 
     await imageAgent.hydrateSession({ sessionId, clientState })
 
-    const result = await imageAgent.handleUserMessage({ sessionId, message })
+    const result = await imageAgent.handleUserMessage({
+      sessionId,
+      message,
+      composerMode,
+      requestedToolAction,
+      imageBase64
+    })
 
     res.json({ ok: true, ...result })
   } catch (error) {

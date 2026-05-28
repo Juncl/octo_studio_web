@@ -4,13 +4,18 @@ import type {
   GenerateImageToolArgs,
   GenerateImageToolResult,
   GenerationMode,
+  ImageToolAction,
   ImageSessionState
 } from "./types.js"
 import {
   createDefaultImageSession,
   type SessionStore
 } from "./session-store.js"
-import { generateImageService } from "../tools/generate-image-service.js"
+import {
+  cutoutImageService,
+  generateImageService,
+  superResolutionService
+} from "../tools/generate-image-service.js"
 
 export type ImageGenerationAgentOptions = {
   supportsImg2Img: boolean
@@ -29,6 +34,7 @@ export type AgentReply = {
   type: "chat" | "image_result" | "prompt_updated" | "error"
   text: string
   taskId?: string
+  toolAction?: ImageToolAction
   images?: string[]
   primaryImage?: string | null
   state: ImageSessionState
@@ -38,6 +44,8 @@ export type AgentReply = {
     toolResult?: GenerateImageToolResult
   }
 }
+
+type AgentComposerMode = "image" | "upscale" | string
 
 export class ImageGenerationAgent {
   constructor(
@@ -103,6 +111,9 @@ export class ImageGenerationAgent {
   async handleUserMessage(input: {
     sessionId: string
     message: string
+    composerMode?: AgentComposerMode
+    requestedToolAction?: ImageToolAction
+    imageBase64?: string
   }): Promise<AgentReply> {
     const state =
       (await this.deps.store.get(input.sessionId)) ??
@@ -120,7 +131,11 @@ export class ImageGenerationAgent {
       createdAt: Date.now()
     })
 
-    const plan = await this.planNextStep(state, input.message)
+    const plan = await this.planNextStep(state, input.message, {
+      composerMode: input.composerMode,
+      requestedToolAction: input.requestedToolAction,
+      hasImageBase64: Boolean(input.imageBase64)
+    })
     this.applyPlanToState(state, plan)
 
     if (!plan.shouldCallTool) {
@@ -147,25 +162,50 @@ export class ImageGenerationAgent {
       }
     }
 
-    const toolArgs = this.buildToolArgs(state, plan)
+    const toolArgs =
+      plan.toolAction === "generate_image"
+        ? this.buildToolArgs(state, plan)
+        : undefined
 
     try {
-      const toolResult = await generateImageService(toolArgs)
+      const toolResult =
+        plan.toolAction === "super_resolution"
+          ? await superResolutionService({
+              imageBase64: input.imageBase64 ?? "",
+              userIdx: this.deps.options.userIdx,
+              pollIntervalMs: 2000,
+              maxPollCount: 60,
+              maxCreateRetries: 3,
+              createTimeoutMs: 30000
+            })
+          : plan.toolAction === "cutout"
+            ? await cutoutImageService({
+                imageBase64: input.imageBase64 ?? "",
+                userIdx: this.deps.options.userIdx,
+                pollIntervalMs: 2000,
+                maxPollCount: 60,
+                maxCreateRetries: 3,
+                createTimeoutMs: 30000
+              })
+          : await generateImageService(toolArgs as GenerateImageToolArgs)
       const images = toolResult.images ?? []
       const primaryImage = toolResult.primaryImage ?? images[0] ?? null
 
       state.lastTaskId = toolResult.taskId
       state.lastImages = images
       state.primaryImage = primaryImage ?? undefined
-      state.lastSuccessfulPrompt = plan.finalPrompt
-      state.canonicalPrompt = plan.finalPrompt
-      state.currentPrompt = plan.finalPrompt
+      if (plan.toolAction === "generate_image") {
+        state.lastSuccessfulPrompt = plan.finalPrompt
+        state.canonicalPrompt = plan.finalPrompt
+        state.currentPrompt = plan.finalPrompt
+      }
       state.currentUserPrompt = plan.customerPrompt
 
       state.history.push({
         role: "tool",
         content: JSON.stringify({
           ok: toolResult.ok,
+          toolAction: toolResult.toolAction,
           taskId: toolResult.taskId,
           images: toolResult.images,
           primaryImage: toolResult.primaryImage,
@@ -189,12 +229,13 @@ export class ImageGenerationAgent {
         type: "image_result",
         text,
         taskId: toolResult.taskId,
+        toolAction: plan.toolAction,
         images,
         primaryImage,
         state,
         debug: {
           plan,
-          toolArgs,
+          ...(toolArgs ? { toolArgs } : {}),
           toolResult
         }
       }
@@ -234,7 +275,12 @@ export class ImageGenerationAgent {
 
   private async planNextStep(
     state: ImageSessionState,
-    userMessage: string
+    userMessage: string,
+    requestContext: {
+      composerMode?: AgentComposerMode
+      requestedToolAction?: ImageToolAction
+      hasImageBase64: boolean
+    }
   ): Promise<AgentPlan> {
     const systemPrompt = this.buildPlannerSystemPrompt()
     const userPrompt = [
@@ -264,6 +310,17 @@ export class ImageGenerationAgent {
         2
       ),
       "",
+      "当前 UI / 工具上下文：",
+      JSON.stringify(
+        {
+          composerMode: requestContext.composerMode ?? "image",
+          requestedToolAction: requestContext.requestedToolAction,
+          hasImageBase64: requestContext.hasImageBase64
+        },
+        null,
+        2
+      ),
+      "",
       "用户新输入：",
       userMessage,
       "",
@@ -282,9 +339,9 @@ export class ImageGenerationAgent {
         }
       ])
 
-      return this.normalizePlan(plan, state, userMessage)
+      return this.normalizePlan(plan, state, userMessage, requestContext)
     } catch {
-      return this.heuristicPlan(state, userMessage)
+      return this.heuristicPlan(state, userMessage, requestContext)
     }
   }
 
@@ -301,6 +358,20 @@ export class ImageGenerationAgent {
 6. 如果用户说“再加一个苹果”“背景换成公园”“让它更可爱”，这通常是修改上一张图片。
 7. 如果当前没有上一张图，则把修改请求转成完整文生图请求。
 8. 如果只是讨论想法，没有明确要求生成或修改，则 shouldCallTool=false。
+9. 你只输出工具计划，不要输出 create_task payload。
+
+工具动作规则：
+- toolAction=generate_image：普通文生图或图片编辑，会由后端组装普通生图 payload。
+- toolAction=super_resolution：变清晰、高清、超分、提升分辨率，会由后端固定组装 magnify payload。
+- toolAction=cutout：抠图、去背景、移除背景，会由后端固定组装 remove_bg payload。
+- 如果当前 UI 模式 composerMode=upscale，toolAction 必须是 super_resolution，shouldCallTool=true，requiresImage=true。
+- 如果当前 UI 模式 composerMode=cutout，toolAction 必须是 cutout，shouldCallTool=true，requiresImage=true。
+- 如果用户说“变清晰、高清、超分、提升分辨率”，并且有当前图片，toolAction 应为 super_resolution。
+- 如果用户说“抠图、去背景、移除背景、透明背景”，并且有当前图片，toolAction 应为 cutout。
+- super_resolution 不需要 prompt，不要为它生成普通生图 payload。
+- super_resolution 的后端 payload 固定为 task_type="magnify"，args.mode="super_resolution"，args.image_base64=当前图片 base64。
+- cutout 不需要 prompt，不要为它生成普通生图 payload。
+- cutout 的后端 payload 固定为 task_type="remove_bg"，args.num_image=1，args.image_list=[{ mode:"new", image_base64:当前图片 base64 }]。
 
 多轮图片生成规则：
 - 如果用户第二轮、第三轮说“加一个苹果”“换成蓝色”“背景改成公园”“再可爱一点”，这不是新图，而是对上一张图的增量修改。
@@ -312,6 +383,7 @@ export class ImageGenerationAgent {
 必须输出 JSON，格式如下：
 
 {
+  "toolAction": "generate_image | super_resolution | cutout | chat | prompt_only",
   "intent": "new_image | edit_previous_image | refine_prompt_only | chat",
   "generationMode": "txt2img | img2img",
   "shouldCallTool": true,
@@ -324,6 +396,7 @@ export class ImageGenerationAgent {
   "lighting": "光照",
   "colorPalette": "颜色",
   "usePreviousImage": true,
+  "requiresImage": false,
   "reason": "为什么这样判断"
 }
 
@@ -341,13 +414,19 @@ export class ImageGenerationAgent {
   private normalizePlan(
     plan: Partial<AgentPlan>,
     state: ImageSessionState,
-    userMessage: string
+    userMessage: string,
+    requestContext: {
+      composerMode?: AgentComposerMode
+      requestedToolAction?: ImageToolAction
+      hasImageBase64: boolean
+    }
   ): AgentPlan {
     const hasPreviousImage = Boolean(state.primaryImage || state.lastImages?.[0])
     const hasContext = this.hasImageContext(state)
     const isIncrementalEdit = this.looksLikeIncrementalEdit(userMessage)
 
     const normalized: AgentPlan = {
+      toolAction: plan.toolAction ?? "chat",
       intent: plan.intent ?? "chat",
       generationMode: plan.generationMode ?? "txt2img",
       shouldCallTool: Boolean(plan.shouldCallTool),
@@ -360,12 +439,52 @@ export class ImageGenerationAgent {
       lighting: plan.lighting || state.lighting,
       colorPalette: plan.colorPalette || state.colorPalette,
       usePreviousImage: Boolean(plan.usePreviousImage),
+      requiresImage: Boolean(plan.requiresImage),
       reason: plan.reason || ""
+    }
+
+    if (normalized.shouldCallTool && normalized.toolAction === "chat") {
+      normalized.toolAction = "generate_image"
+    }
+
+    if (normalized.intent === "refine_prompt_only") {
+      normalized.toolAction = "prompt_only"
+    }
+
+    if (requestContext.requestedToolAction) {
+      normalized.toolAction = requestContext.requestedToolAction
+    }
+
+    if (requestContext.composerMode === "upscale") {
+      normalized.toolAction = "super_resolution"
+    }
+
+    if (requestContext.composerMode === "cutout") {
+      normalized.toolAction = "cutout"
+    }
+
+    if (
+      normalized.toolAction === "super_resolution" ||
+      normalized.toolAction === "cutout"
+    ) {
+      normalized.intent = "edit_previous_image"
+      normalized.generationMode = "img2img"
+      normalized.shouldCallTool = true
+      normalized.requiresImage = true
+      normalized.usePreviousImage = false
+      normalized.finalPrompt = ""
+      normalized.reason +=
+        normalized.toolAction === "super_resolution"
+          ? "；当前请求被路由到变清晰工具。"
+          : "；当前请求被路由到抠图工具。"
+
+      return normalized
     }
 
     if (hasContext && isIncrementalEdit) {
       normalized.intent = "edit_previous_image"
       normalized.shouldCallTool = true
+      normalized.toolAction = "generate_image"
     }
 
     if (normalized.intent === "edit_previous_image" && hasPreviousImage) {
@@ -413,8 +532,41 @@ export class ImageGenerationAgent {
 
   private heuristicPlan(
     state: ImageSessionState,
-    userMessage: string
+    userMessage: string,
+    requestContext: {
+      composerMode?: AgentComposerMode
+      requestedToolAction?: ImageToolAction
+      hasImageBase64: boolean
+    }
   ): AgentPlan {
+    if (
+      requestContext.requestedToolAction === "super_resolution" ||
+      requestContext.requestedToolAction === "cutout" ||
+      requestContext.composerMode === "upscale" ||
+      requestContext.composerMode === "cutout"
+    ) {
+      const toolAction =
+        requestContext.requestedToolAction ??
+        (requestContext.composerMode === "cutout" ? "cutout" : "super_resolution")
+
+      return this.normalizePlan(
+        {
+          toolAction,
+          intent: "edit_previous_image",
+          generationMode: "img2img",
+          shouldCallTool: true,
+          customerPrompt: userMessage,
+          finalPrompt: "",
+          requiresImage: true,
+          usePreviousImage: false,
+          reason: "启发式规则根据 UI 模式判断为图片工具处理。"
+        },
+        state,
+        userMessage,
+        requestContext
+      )
+    }
+
     const hasContext = this.hasImageContext(state)
     const looksLikeEdit = this.looksLikeIncrementalEdit(userMessage)
     const generateKeywords = [
@@ -440,6 +592,7 @@ export class ImageGenerationAgent {
       return this.normalizePlan(
         {
           intent: "edit_previous_image",
+          toolAction: "generate_image",
           generationMode: mode,
           shouldCallTool: true,
           customerPrompt: userMessage,
@@ -448,7 +601,8 @@ export class ImageGenerationAgent {
           reason: "启发式规则判断为基于上一张图片修改。"
         },
         state,
-        userMessage
+        userMessage,
+        requestContext
       )
     }
 
@@ -457,6 +611,7 @@ export class ImageGenerationAgent {
 
       return {
         intent: "new_image",
+        toolAction: "generate_image",
         generationMode: "txt2img",
         shouldCallTool: true,
         customerPrompt: userMessage,
@@ -474,6 +629,7 @@ export class ImageGenerationAgent {
 
     return {
       intent: "chat",
+      toolAction: "chat",
       generationMode: "txt2img",
       shouldCallTool: false,
       customerPrompt: userMessage,
@@ -601,6 +757,11 @@ export class ImageGenerationAgent {
   }
 
   private applyPlanToState(state: ImageSessionState, plan: AgentPlan): void {
+    if (plan.toolAction === "super_resolution" || plan.toolAction === "cutout") {
+      state.currentUserPrompt = plan.customerPrompt
+      return
+    }
+
     state.currentPrompt = plan.finalPrompt
     state.currentUserPrompt = plan.customerPrompt
     state.canonicalPrompt = plan.finalPrompt
@@ -662,6 +823,28 @@ export class ImageGenerationAgent {
     const imageCount = result.images?.length ?? 0
 
     if (plan.generationMode === "img2img") {
+      if (plan.toolAction === "super_resolution") {
+        return [
+          "已完成图片变清晰。",
+          `处理方式：${plan.customerPrompt || "超分辨率"}`,
+          `生成数量：${imageCount}`,
+          result.primaryImage ? `主图：${result.primaryImage}` : ""
+        ]
+          .filter(Boolean)
+          .join("\n")
+      }
+
+      if (plan.toolAction === "cutout") {
+        return [
+          "已完成图片抠图。",
+          `处理方式：${plan.customerPrompt || "移除背景"}`,
+          `生成数量：${imageCount}`,
+          result.primaryImage ? `主图：${result.primaryImage}` : ""
+        ]
+          .filter(Boolean)
+          .join("\n")
+      }
+
       return [
         "已基于上一张图片完成修改。",
         `修改需求：${plan.customerPrompt}`,
