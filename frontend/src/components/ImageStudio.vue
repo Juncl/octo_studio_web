@@ -1231,21 +1231,11 @@ watch(
           </div>
           <div class="studio-tree-actions">
             <button
-              class="studio-tree-add-session-button"
-              type="button"
-              aria-label="添加会话"
-              title="添加会话"
-              @click="handleNewChat"
-            >
-              ＋
-            </button>
-            <button
               class="studio-tree-toggle-button"
               type="button"
               aria-label="展开会话列表"
               title="展开会话列表"
             >
-              ⌄
             </button>
           </div>
         </div>
@@ -1422,16 +1412,6 @@ watch(
               placeholder="上传参考图、输入文字，描述你想生成的图片。"
               @keydown="handleKeyDown"
             />
-
-            <button
-              class="welcome-send"
-              type="button"
-              :disabled="!canSubmit"
-              @click="handleSubmit"
-            >
-              <span v-if="loading" class="send-spinner" />
-              <span v-else class="welcome-send-icon">➤</span>
-            </button>
           </div>
 
           <div class="welcome-toolbar">
@@ -1462,6 +1442,16 @@ watch(
               ☷
             </button>
             <button class="welcome-toolbar-grid-button" type="button">▣</button>
+
+            <button
+              class="welcome-send"
+              type="button"
+              :disabled="!canSubmit"
+              @click="handleSubmit"
+            >
+              <span v-if="loading" class="send-spinner" />
+              <span v-else class="welcome-send-icon">➤</span>
+            </button>
           </div>
         </div>
       </section>
@@ -1605,7 +1595,6 @@ watch(
                     v-if="option.id === selectedComposerStyleId"
                     class="workspace-style-option-check"
                   >
-                    ✓
                   </span>
                 </button>
               </div>
