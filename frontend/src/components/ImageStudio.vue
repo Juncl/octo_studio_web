@@ -31,6 +31,8 @@ type ClientAgentState = {
   width: number
   height: number
   numImage: number
+  styleModel?: string
+  aspectRatio?: string
 
   lastTaskId?: string
   lastImages: string[]
@@ -172,7 +174,7 @@ const composerStyleOptions: ComposerStyleOption[] = [
   },
   {
     id: "hdesign",
-    label: "HDesign",
+    label: "H Design插画",
     icon: "H"
   },
   {
@@ -197,14 +199,14 @@ const composerAspectOptions: ComposerAspectOption[] = [
   {
     id: "2:3",
     label: "2:3",
-    width: 768,
-    height: 1152
+    width: 800,
+    height: 1200
   },
   {
     id: "3:4",
     label: "3:4",
-    width: 864,
-    height: 1152
+    width: 768,
+    height: 1024
   },
   {
     id: "9:16",
@@ -215,14 +217,14 @@ const composerAspectOptions: ComposerAspectOption[] = [
   {
     id: "3:2",
     label: "3:2",
-    width: 1152,
-    height: 768
+    width: 1200,
+    height: 800
   },
   {
     id: "4:3",
     label: "4:3",
-    width: 1152,
-    height: 864
+    width: 1024,
+    height: 768
   },
   {
     id: "16:9",
@@ -242,7 +244,8 @@ const selectedPreviewMessageId = ref<string | null>(null)
 const scrollRef = ref<HTMLDivElement | null>(null)
 const openComposerMenu = ref<ComposerMenu | null>(null)
 const selectedComposerModeId = ref("image")
-const selectedComposerStyleId = ref("qianwen")
+const defaultComposerStyleId = "qianwen"
+const defaultAspectId = "1:1"
 
 const activeConversation = computed(() => {
   return conversations.value.find((item) => item.id === activeId.value)
@@ -261,15 +264,19 @@ const activeAgentState = computed(() => {
 const selectedAspectId = computed(() => {
   const state = activeAgentState.value
 
-  if (!state) return composerAspectOptions[0].id
+  if (!state) return defaultAspectId
+  if (state.aspectRatio) return state.aspectRatio
 
   return (
     composerAspectOptions.find((option) => {
       return option.width === state.width && option.height === state.height
-    })?.id ?? composerAspectOptions[0].id
+    })?.id ?? defaultAspectId
   )
 })
 const selectedImageCount = computed(() => activeAgentState.value?.numImage ?? 2)
+const selectedComposerStyleId = computed(() => {
+  return activeAgentState.value?.styleModel ?? defaultComposerStyleId
+})
 const canSubmit = computed(() => {
   if (loading.value || !activeConversation.value) return false
 
@@ -380,9 +387,29 @@ function createId(prefix = "id") {
   return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`
 }
 
+function getComposerTargetSize(styleModel: string, aspectRatio: string) {
+  if (styleModel === "developer" && aspectRatio === "1:1") {
+    return {
+      width: 1280,
+      height: 1280
+    }
+  }
+
+  const option =
+    composerAspectOptions.find((item) => item.id === aspectRatio) ??
+    composerAspectOptions[0]
+
+  return {
+    width: option.width,
+    height: option.height
+  }
+}
+
 function createEmptyAgentState(sessionId: string): ClientAgentState {
   return {
     sessionId,
+    styleModel: defaultComposerStyleId,
+    aspectRatio: defaultAspectId,
     width: 1024,
     height: 1024,
     numImage: 2,
@@ -608,6 +635,13 @@ function toClientAgentState(conversation: StoredConversation): ClientAgentState 
     width: base.width ?? 1024,
     height: base.height ?? 1024,
     numImage: base.numImage ?? 2,
+    styleModel: base.styleModel ?? defaultComposerStyleId,
+    aspectRatio:
+      base.aspectRatio ??
+      composerAspectOptions.find((option) => {
+        return option.width === base.width && option.height === base.height
+      })?.id ??
+      defaultAspectId,
     lastTaskId: base.lastTaskId ?? conversation.taskId,
     lastImages:
       base.lastImages && base.lastImages.length > 0
@@ -646,6 +680,8 @@ function slimAgentStateFromResponse(
     height: typeof state.height === "number" ? state.height : base.height,
     numImage:
       typeof state.numImage === "number" ? state.numImage : base.numImage,
+    styleModel: state.styleModel ?? base.styleModel,
+    aspectRatio: state.aspectRatio ?? base.aspectRatio,
 
     lastTaskId: state.lastTaskId ?? base.lastTaskId,
     lastImages: Array.isArray(state.lastImages)
@@ -748,19 +784,41 @@ function handleSelectComposerMode(option: ComposerModeOption) {
 }
 
 function handleSelectComposerStyle(option: ComposerStyleOption) {
-  selectedComposerStyleId.value = option.id
+  updateActiveConversation((conversation) => {
+    const state = toClientAgentState(conversation)
+    const aspectRatio = state.aspectRatio ?? selectedAspectId.value
+    const size = getComposerTargetSize(option.id, aspectRatio)
+
+    return {
+      ...conversation,
+      updatedAt: Date.now(),
+      agentState: {
+        ...state,
+        styleModel: option.id,
+        aspectRatio,
+        width: size.width,
+        height: size.height
+      }
+    }
+  })
   openComposerMenu.value = null
 }
 
 function handleSelectAspect(option: ComposerAspectOption) {
   updateActiveConversation((conversation) => {
+    const state = toClientAgentState(conversation)
+    const styleModel = state.styleModel ?? selectedComposerStyleId.value
+    const size = getComposerTargetSize(styleModel, option.id)
+
     return {
       ...conversation,
       updatedAt: Date.now(),
       agentState: {
-        ...toClientAgentState(conversation),
-        width: option.width,
-        height: option.height
+        ...state,
+        styleModel,
+        aspectRatio: option.id,
+        width: size.width,
+        height: size.height
       }
     }
   })
@@ -887,7 +945,9 @@ async function submitAgentRequest(options: {
     })
 
     const nextImages = result.images ?? []
-    const assistantText = result.text ?? "已完成图片生成。"
+    const assistantText = getMessageBubbleContent(
+      result.text ?? "已完成图片生成。"
+    )
     const generatedFileName = getFeatureFileName(text, result.state)
 
     const assistantMessage: ChatMessage = {
@@ -1037,6 +1097,30 @@ function startTypewriter(messageId: string, fullText: string) {
       typingMessageId.value = null
     }
   }, 16)
+}
+
+function getMessageBubbleContent(messageOrContent: ChatMessage | string) {
+  if (
+    typeof messageOrContent !== "string" &&
+    messageOrContent.role === "user"
+  ) {
+    return messageOrContent.content
+  }
+
+  const content =
+    typeof messageOrContent === "string"
+      ? messageOrContent
+      : messageOrContent.content
+
+  return content
+    .split("\n")
+    .filter((line) => {
+      const normalized = line.trim()
+
+      return !normalized.startsWith("主图:") && !normalized.startsWith("主图：")
+    })
+    .join("\n")
+    .trim()
 }
 
 function getPreviewGridClass() {
@@ -1360,7 +1444,7 @@ watch(
 
         <div ref="scrollRef" class="conversation-scroll">
           <div
-            v-for="message in messages.filter((item) => item.role === 'user' || item.pending || item.content)"
+            v-for="message in messages.filter((item) => item.role === 'user' || item.pending || getMessageBubbleContent(item))"
             :key="message.id"
             :class="
               message.role === 'user'
@@ -1384,7 +1468,7 @@ watch(
 
             <template v-else>
               <div :class="message.role === 'user' ? 'message-bubble user-bubble' : 'message-bubble assistant-text'">
-                <span class="message-content">{{ message.content }}</span>
+                <span class="message-content">{{ getMessageBubbleContent(message) }}</span>
                 <span
                   v-if="message.id === typingMessageId && message.typing"
                   class="typing-caret"
@@ -1466,8 +1550,6 @@ watch(
         </div>
 
         <div class="canvas-floating-actions">
-          <button class="canvas-favorite-button" type="button">♡</button>
-          <button class="canvas-regenerate-button" type="button">↻</button>
           <a
             :href="currentPreview ?? '#'"
             target="_blank"

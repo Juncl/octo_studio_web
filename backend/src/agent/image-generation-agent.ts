@@ -47,6 +47,129 @@ export type AgentReply = {
 
 type AgentComposerMode = "image" | "upscale" | string
 
+type ImageStyleConfig = {
+  taskType: string
+  tagName: string
+  target: string
+  loras: Array<{
+    name: string
+    weight: number | string
+  }>
+  mode: string
+}
+
+const defaultStyleModel = "qianwen"
+const defaultAspectRatio = "1:1"
+
+const imageStyleConfigs: Record<string, ImageStyleConfig> = {
+  qianwen: {
+    taskType: "txt2img_qwen",
+    tagName: "Qwen-Image",
+    target: "flux1-dev",
+    loras: [],
+    mode: "performance"
+  },
+  bdicon: {
+    taskType: "txt2img_v2_performance",
+    tagName: "BDIcon",
+    target: "flux1-dev",
+    loras: [{ name: "F.1_BDicon", weight: 0.8 }],
+    mode: "performance"
+  },
+  portrait: {
+    taskType: "txt2img_v2_performance",
+    tagName: "质感人像",
+    target: "flux1-krea-dev-fp8",
+    loras: [{ name: "F.1_textured_portrait", weight: 0.8 }],
+    mode: "performance"
+  },
+  developer: {
+    taskType: "txt2img_v2_performance",
+    tagName: "开发者人物形象",
+    target: "flux1-dev",
+    loras: [{ name: "F.1_hwc3dcharacter_latest", weight: "0.8" }],
+    mode: "performance"
+  },
+  agent: {
+    taskType: "txt2img_qwen",
+    tagName: "小艺agent",
+    target: "flux1-dev",
+    loras: [{ name: "F.1_xiaoyi_agent", weight: 0.85 }],
+    mode: "performance"
+  },
+  smart3d: {
+    taskType: "txt2img_v2_performance",
+    tagName: "智慧3D",
+    target: "flux1-dev",
+    loras: [{ name: "F.1_intelligent3d", weight: 1 }],
+    mode: "hd"
+  },
+  abstract: {
+    taskType: "txt2img_v2_performance",
+    tagName: "抽象几何背景",
+    target: "flux1-dev",
+    loras: [{ name: "F.1_abstract_wallpaper", weight: 1 }],
+    mode: "performance"
+  },
+  yunbao: {
+    taskType: "txt2img_v2_performance",
+    tagName: "云宝",
+    target: "flux1-dev",
+    loras: [{ name: "yunbao", weight: 1 }],
+    mode: "performance"
+  },
+  hdesign: {
+    taskType: "txt2img_v2_performance",
+    tagName: "H Design插画",
+    target: "flux1-dev",
+    loras: [{ name: "F.1_hdesign", weight: 1 }],
+    mode: "performance"
+  },
+  harmony: {
+    taskType: "txt2img_v2_performance",
+    tagName: "鸿蒙插画",
+    target: "flux1-dev",
+    loras: [{ name: "F.1_harmonyOSIllustration", weight: 1 }],
+    mode: "performance"
+  },
+  abstract3d: {
+    taskType: "txt2img_v2_performance",
+    tagName: "3D抽象元素",
+    target: "flux1-dev",
+    loras: [{ name: "F.1_hwcbanner", weight: 0.8 }],
+    mode: "performance"
+  }
+}
+
+const aspectTargetSizes: Record<string, { width: number; height: number }> = {
+  "1:1": { width: 1024, height: 1024 },
+  "2:3": { width: 800, height: 1200 },
+  "3:4": { width: 768, height: 1024 },
+  "9:16": { width: 720, height: 1280 },
+  "3:2": { width: 1200, height: 800 },
+  "4:3": { width: 1024, height: 768 },
+  "16:9": { width: 1280, height: 720 }
+}
+
+function getImageStyleConfig(styleModel?: string): ImageStyleConfig {
+  return imageStyleConfigs[styleModel ?? ""] ?? imageStyleConfigs[defaultStyleModel]
+}
+
+function getTargetSizeForAspect(styleModel?: string, aspectRatio?: string) {
+  const normalizedStyle = imageStyleConfigs[styleModel ?? ""]
+    ? styleModel
+    : defaultStyleModel
+  const normalizedAspect = aspectTargetSizes[aspectRatio ?? ""]
+    ? aspectRatio
+    : defaultAspectRatio
+
+  if (normalizedStyle === "developer" && normalizedAspect === "1:1") {
+    return { width: 1280, height: 1280 }
+  }
+
+  return aspectTargetSizes[normalizedAspect ?? defaultAspectRatio]
+}
+
 export class ImageGenerationAgent {
   constructor(
     private deps: {
@@ -95,6 +218,9 @@ export class ImageGenerationAgent {
         typeof clientState.numImage === "number"
           ? clientState.numImage
           : existing.numImage || this.deps.options.defaultNumImage,
+      styleModel: clientState.styleModel ?? existing.styleModel ?? defaultStyleModel,
+      aspectRatio:
+        clientState.aspectRatio ?? existing.aspectRatio ?? defaultAspectRatio,
       lastTaskId: clientState.lastTaskId ?? existing.lastTaskId,
       lastImages: Array.isArray(clientState.lastImages)
         ? clientState.lastImages
@@ -104,6 +230,12 @@ export class ImageGenerationAgent {
         ? clientState.history
         : existing.history ?? []
     }
+    const targetSize = getTargetSizeForAspect(
+      hydrated.styleModel,
+      hydrated.aspectRatio
+    )
+    hydrated.width = targetSize.width
+    hydrated.height = targetSize.height
 
     await this.deps.store.set(sessionId, hydrated)
   }
@@ -122,8 +254,13 @@ export class ImageGenerationAgent {
     state.width = state.width || this.deps.options.defaultWidth
     state.height = state.height || this.deps.options.defaultHeight
     state.numImage = state.numImage || this.deps.options.defaultNumImage
+    state.styleModel = state.styleModel ?? defaultStyleModel
+    state.aspectRatio = state.aspectRatio ?? defaultAspectRatio
     state.lastImages = state.lastImages ?? []
     state.history = state.history ?? []
+    const targetSize = getTargetSizeForAspect(state.styleModel, state.aspectRatio)
+    state.width = targetSize.width
+    state.height = targetSize.height
 
     state.history.push({
       role: "user",
@@ -302,6 +439,8 @@ export class ImageGenerationAgent {
           width: state.width,
           height: state.height,
           numImage: state.numImage,
+          styleModel: state.styleModel,
+          aspectRatio: state.aspectRatio,
           lastTaskId: state.lastTaskId,
           lastImages: state.lastImages,
           primaryImage: state.primaryImage
@@ -784,10 +923,15 @@ export class ImageGenerationAgent {
             (item): item is string => Boolean(item)
           )
         : []
+    const styleConfig = getImageStyleConfig(state.styleModel)
+    const targetSize = getTargetSizeForAspect(
+      state.styleModel,
+      state.aspectRatio
+    )
     const taskType =
       plan.generationMode === "img2img"
         ? this.deps.options.img2imgTaskType
-        : this.deps.options.txt2imgTaskType
+        : styleConfig.taskType
 
     if (plan.generationMode === "img2img" && !taskType) {
       throw new Error(
@@ -795,19 +939,22 @@ export class ImageGenerationAgent {
       )
     }
 
+    state.width = targetSize.width
+    state.height = targetSize.height
+
     return {
       prompt: plan.finalPrompt,
       customerPrompt: plan.customerPrompt,
       generationMode: plan.generationMode,
       userIdx: this.deps.options.userIdx,
       taskType,
-      tagName: this.deps.options.tagName,
+      tagName: styleConfig.tagName,
       numImage: state.numImage || this.deps.options.defaultNumImage,
-      target: this.deps.options.target,
-      width: state.width || this.deps.options.defaultWidth,
-      height: state.height || this.deps.options.defaultHeight,
-      mode: this.deps.options.apiMode,
-      loras: [],
+      target: styleConfig.target,
+      width: targetSize.width,
+      height: targetSize.height,
+      mode: styleConfig.mode,
+      loras: styleConfig.loras,
       refImgList,
       pollIntervalMs: 2000,
       maxPollCount: 60,

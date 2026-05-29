@@ -22,6 +22,8 @@ export type ImageSessionState = {
   width: number
   height: number
   numImage: number
+  styleModel?: string
+  aspectRatio?: string
   lastTaskId?: string
   lastImages: string[]
   primaryImage?: string

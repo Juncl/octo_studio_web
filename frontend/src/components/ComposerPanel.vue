@@ -66,18 +66,18 @@ const composerStyleOptions: ComposerStyleOption[] = [
   { id: "smart3d", label: "智慧3D", icon: "3D" },
   { id: "abstract", label: "抽象几何背景", icon: "◍" },
   { id: "yunbao", label: "云宝", icon: "云" },
-  { id: "hdesign", label: "HDesign", icon: "H" },
+  { id: "hdesign", label: "H Design插画", icon: "H" },
   { id: "harmony", label: "鸿蒙插画", icon: "鸿" },
   { id: "abstract3d", label: "3D抽象元素", icon: "◇" }
 ]
 
 const composerAspectOptions: ComposerAspectOption[] = [
   { id: "1:1", label: "1:1", width: 1024, height: 1024, pw: 20, ph: 20 },
-  { id: "2:3", label: "2:3", width: 768, height: 1152, pw: 12, ph: 20 },
-  { id: "3:4", label: "3:4", width: 864, height: 1152, pw: 14, ph: 20 },
+  { id: "2:3", label: "2:3", width: 800, height: 1200, pw: 12, ph: 20 },
+  { id: "3:4", label: "3:4", width: 768, height: 1024, pw: 14, ph: 20 },
   { id: "9:16", label: "9:16", width: 720, height: 1280, pw: 10, ph: 20 },
-  { id: "3:2", label: "3:2", width: 1152, height: 768, pw: 20, ph: 12 },
-  { id: "4:3", label: "4:3", width: 1152, height: 864, pw: 20, ph: 14 },
+  { id: "3:2", label: "3:2", width: 1200, height: 800, pw: 20, ph: 12 },
+  { id: "4:3", label: "4:3", width: 1024, height: 768, pw: 20, ph: 14 },
   { id: "16:9", label: "16:9", width: 1280, height: 720, pw: 20, ph: 10 }
 ]
 

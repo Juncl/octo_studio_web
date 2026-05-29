@@ -23,6 +23,8 @@ export function createDefaultImageSession(sessionId: string): ImageSessionState 
     width: 1024,
     height: 1024,
     numImage: 2,
+    styleModel: "qianwen",
+    aspectRatio: "1:1",
     lastImages: [],
     history: []
   }
