@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue"
+import ComposerPanel from "./ComposerPanel.vue"
 
 type ChatMessage = {
   id: string
@@ -230,8 +231,6 @@ const composerAspectOptions: ComposerAspectOption[] = [
     height: 720
   }
 ]
-
-const composerImageCountOptions = [1, 2, 3, 4]
 
 const conversations = ref<StoredConversation[]>([])
 const activeId = ref("")
@@ -1030,13 +1029,6 @@ function startTypewriter(messageId: string, fullText: string) {
   }, 16)
 }
 
-function handleKeyDown(event: KeyboardEvent) {
-  if (event.key === "Enter" && !event.shiftKey) {
-    event.preventDefault()
-    handleSubmit()
-  }
-}
-
 function getPreviewGridClass() {
   if (images.value.length === 1) return "preview-grid single"
   if (images.value.length === 2) return "preview-grid two"
@@ -1276,184 +1268,22 @@ watch(
         <h1 class="welcome-title">Octo Studio</h1>
         <p class="welcome-subtitle">描述你想要的创意效果</p>
 
-        <div class="welcome-composer">
-          <div
-            v-if="openComposerMenu === 'mode'"
-            class="workspace-composer-menu workspace-mode-menu"
-          >
-            <button
-              v-for="option in composerModeOptions"
-              :key="option.id"
-              type="button"
-              :class="
-                option.id === selectedComposerModeId
-                  ? 'workspace-menu-option workspace-mode-option active'
-                  : 'workspace-menu-option workspace-mode-option'
-              "
-              @click="handleSelectComposerMode(option)"
-            >
-              <span
-                v-if="option.dividerBefore"
-                class="workspace-menu-divider"
-              />
-              <span class="workspace-menu-option-content">
-                <span class="workspace-menu-option-icon workspace-mode-option-icon">
-                  {{ option.icon }}
-                </span>
-                <span class="workspace-menu-option-label">{{ option.label }}</span>
-                <span
-                  v-if="option.id === selectedComposerModeId"
-                  class="workspace-menu-option-check"
-                >
-                  ✓
-                </span>
-              </span>
-            </button>
-          </div>
-
-          <div
-            v-if="openComposerMenu === 'style'"
-            class="workspace-composer-menu workspace-style-menu"
-          >
-            <header class="workspace-style-menu-header">
-              <h3 class="workspace-style-menu-title">风格模型</h3>
-            </header>
-
-            <div class="workspace-style-menu-grid">
-              <button
-                v-for="option in composerStyleOptions"
-                :key="option.id"
-                type="button"
-                :class="
-                  option.id === selectedComposerStyleId
-                    ? 'workspace-style-option active'
-                    : 'workspace-style-option'
-                "
-                @click="handleSelectComposerStyle(option)"
-              >
-                <span
-                  :class="`workspace-style-option-icon workspace-style-option-icon-${option.id}`"
-                >
-                  {{ option.icon }}
-                </span>
-                <span class="workspace-style-option-label">{{ option.label }}</span>
-                <span
-                  v-if="option.id === selectedComposerStyleId"
-                  class="workspace-style-option-check"
-                >
-                  ✓
-                </span>
-              </button>
-            </div>
-          </div>
-
-          <div
-            v-if="openComposerMenu === 'settings'"
-            class="workspace-composer-menu workspace-settings-menu"
-          >
-            <header class="workspace-settings-menu-header">
-              <h3 class="workspace-settings-menu-title">图片设置</h3>
-            </header>
-
-            <section class="workspace-settings-section">
-              <h4 class="workspace-settings-section-title">选择比例</h4>
-
-              <div class="workspace-aspect-options">
-                <button
-                  v-for="option in composerAspectOptions"
-                  :key="option.id"
-                  type="button"
-                  :class="
-                    option.id === selectedAspectId
-                      ? 'workspace-aspect-option active'
-                      : 'workspace-aspect-option'
-                  "
-                  @click="handleSelectAspect(option)"
-                >
-                  <span
-                    class="workspace-aspect-preview"
-                    :style="{ aspectRatio: `${option.width} / ${option.height}` }"
-                  />
-                  <span class="workspace-aspect-label">{{ option.label }}</span>
-                </button>
-              </div>
-            </section>
-
-            <section class="workspace-settings-section workspace-count-section">
-              <h4 class="workspace-settings-section-title">图片数量</h4>
-
-              <div class="workspace-count-options">
-                <button
-                  v-for="count in composerImageCountOptions"
-                  :key="count"
-                  type="button"
-                  :class="
-                    count === selectedImageCount
-                      ? 'workspace-count-option active'
-                      : 'workspace-count-option'
-                  "
-                  @click="handleSelectImageCount(count)"
-                >
-                  {{ count }}张
-                </button>
-              </div>
-            </section>
-          </div>
-
-          <div class="welcome-composer-body">
-            <button class="reference-card welcome-reference-button" type="button">
-              ＋
-            </button>
-
-            <textarea
-              v-model="input"
-              class="welcome-input"
-              :disabled="loading"
-              placeholder="上传参考图、输入文字，描述你想生成的图片。"
-              @keydown="handleKeyDown"
-            />
-          </div>
-
-          <div class="welcome-toolbar">
-            <button
-              class="welcome-toolbar-mode-button"
-              type="button"
-              :aria-expanded="openComposerMenu === 'mode'"
-              @click="toggleComposerMenu('mode')"
-            >
-              {{ selectedComposerMode.label }} ⌄
-            </button>
-            <button
-              class="welcome-toolbar-prompt-button"
-              type="button"
-              :aria-expanded="openComposerMenu === 'style'"
-              @click="toggleComposerMenu('style')"
-            >
-              {{ selectedComposerStyle.label }} ⌄
-            </button>
-            <button
-              class="welcome-toolbar-layout-button"
-              type="button"
-              aria-label="图片设置"
-              title="图片设置"
-              :aria-expanded="openComposerMenu === 'settings'"
-              @click="toggleComposerMenu('settings')"
-            >
-              ☷
-            </button>
-            <button class="welcome-toolbar-grid-button" type="button">▣</button>
-
-            <button
-              class="welcome-send"
-              type="button"
-              :disabled="!canSubmit"
-              @click="handleSubmit"
-            >
-              <span v-if="loading" class="send-spinner" />
-              <span v-else class="welcome-send-icon">➤</span>
-            </button>
-          </div>
-        </div>
+        <ComposerPanel
+          v-model="input"
+          :loading="loading"
+          :can-submit="canSubmit"
+          :open-menu="openComposerMenu"
+          :selected-mode-id="selectedComposerModeId"
+          :selected-style-id="selectedComposerStyleId"
+          :selected-aspect-id="selectedAspectId"
+          :selected-image-count="selectedImageCount"
+          @toggle-menu="toggleComposerMenu"
+          @select-mode="handleSelectComposerMode"
+          @select-style="handleSelectComposerStyle"
+          @select-aspect="handleSelectAspect"
+          @select-image-count="handleSelectImageCount"
+          @submit="handleSubmit"
+        />
       </section>
     </main>
 
@@ -1530,190 +1360,22 @@ watch(
         </div>
 
         <div class="workspace-composer-wrap">
-          <div class="welcome-composer workspace-composer">
-            <div
-              v-if="openComposerMenu === 'mode'"
-              class="workspace-composer-menu workspace-mode-menu"
-            >
-              <button
-                v-for="option in composerModeOptions"
-                :key="option.id"
-                type="button"
-                :class="
-                  option.id === selectedComposerModeId
-                    ? 'workspace-menu-option workspace-mode-option active'
-                    : 'workspace-menu-option workspace-mode-option'
-                "
-                @click="handleSelectComposerMode(option)"
-              >
-                <span
-                  v-if="option.dividerBefore"
-                  class="workspace-menu-divider"
-                />
-                <span class="workspace-menu-option-content">
-                  <span class="workspace-menu-option-icon workspace-mode-option-icon">
-                    {{ option.icon }}
-                  </span>
-                  <span class="workspace-menu-option-label">{{ option.label }}</span>
-                  <span
-                    v-if="option.id === selectedComposerModeId"
-                    class="workspace-menu-option-check"
-                  >
-                    ✓
-                  </span>
-                </span>
-              </button>
-            </div>
-
-            <div
-              v-if="openComposerMenu === 'style'"
-              class="workspace-composer-menu workspace-style-menu"
-            >
-              <header class="workspace-style-menu-header">
-                <h3 class="workspace-style-menu-title">风格模型</h3>
-              </header>
-
-              <div class="workspace-style-menu-grid">
-                <button
-                  v-for="option in composerStyleOptions"
-                  :key="option.id"
-                  type="button"
-                  :class="
-                    option.id === selectedComposerStyleId
-                      ? 'workspace-style-option active'
-                      : 'workspace-style-option'
-                  "
-                  @click="handleSelectComposerStyle(option)"
-                >
-                  <span
-                    :class="`workspace-style-option-icon workspace-style-option-icon-${option.id}`"
-                  >
-                    {{ option.icon }}
-                  </span>
-                  <span class="workspace-style-option-label">{{ option.label }}</span>
-                  <span
-                    v-if="option.id === selectedComposerStyleId"
-                    class="workspace-style-option-check"
-                  >
-                  </span>
-                </button>
-              </div>
-            </div>
-
-            <div
-              v-if="openComposerMenu === 'settings'"
-              class="workspace-composer-menu workspace-settings-menu"
-            >
-              <header class="workspace-settings-menu-header">
-                <h3 class="workspace-settings-menu-title">图片设置</h3>
-              </header>
-
-              <section class="workspace-settings-section">
-                <h4 class="workspace-settings-section-title">选择比例</h4>
-
-                <div class="workspace-aspect-options">
-                  <button
-                    v-for="option in composerAspectOptions"
-                    :key="option.id"
-                    type="button"
-                    :class="
-                      option.id === selectedAspectId
-                        ? 'workspace-aspect-option active'
-                        : 'workspace-aspect-option'
-                    "
-                    @click="handleSelectAspect(option)"
-                  >
-                    <span
-                      class="workspace-aspect-preview"
-                      :style="{ aspectRatio: `${option.width} / ${option.height}` }"
-                    />
-                    <span class="workspace-aspect-label">{{ option.label }}</span>
-                  </button>
-                </div>
-              </section>
-
-              <section class="workspace-settings-section workspace-count-section">
-                <h4 class="workspace-settings-section-title">图片数量</h4>
-
-                <div class="workspace-count-options">
-                  <button
-                    v-for="count in composerImageCountOptions"
-                    :key="count"
-                    type="button"
-                    :class="
-                      count === selectedImageCount
-                        ? 'workspace-count-option active'
-                        : 'workspace-count-option'
-                    "
-                    @click="handleSelectImageCount(count)"
-                  >
-                    {{ count }}张
-                  </button>
-                </div>
-              </section>
-            </div>
-
-            <div class="workspace-composer-input-row">
-              <button class="reference-card workspace-reference-button small" type="button">＋</button>
-
-              <textarea
-                v-model="input"
-                class="workspace-input"
-                :disabled="loading"
-                placeholder="上传参考图、输入文字，描述你想生成的图片。"
-                @keydown="handleKeyDown"
-              />
-            </div>
-
-            <div class="workspace-toolbar">
-              <button
-                class="workspace-toolbar-mode-button workspace-toolbar-menu-button"
-                type="button"
-                :aria-expanded="openComposerMenu === 'mode'"
-                @click="toggleComposerMenu('mode')"
-              >
-                <span class="workspace-toolbar-button-label">
-                  {{ selectedComposerMode.label }}
-                </span>
-                <span class="workspace-toolbar-button-caret">⌄</span>
-              </button>
-              <button
-                class="workspace-toolbar-prompt-button workspace-toolbar-menu-button"
-                type="button"
-                :aria-expanded="openComposerMenu === 'style'"
-                @click="toggleComposerMenu('style')"
-              >
-                <span class="workspace-toolbar-button-label">
-                  {{ selectedComposerStyle.label }}
-                </span>
-                <span class="workspace-toolbar-button-caret">⌄</span>
-              </button>
-              <button
-                class="workspace-toolbar-settings-button workspace-toolbar-icon-button"
-                type="button"
-                aria-label="生成参数"
-                title="生成参数"
-                :aria-expanded="openComposerMenu === 'settings'"
-                @click="toggleComposerMenu('settings')"
-              >
-                <span class="workspace-toolbar-icon">⌘</span>
-              </button>
-              <button
-                class="workspace-toolbar-preset-button workspace-toolbar-icon-button"
-                type="button"
-                aria-label="预设面板"
-                title="预设面板"
-              >
-                <span class="workspace-toolbar-icon">▣</span>
-              </button>
-              <button
-                class="workspace-send"
-                type="button"
-                :disabled="!canSubmit"
-                @click="handleSubmit"
-              />
-            </div>
-          </div>
+          <ComposerPanel
+            v-model="input"
+            :loading="loading"
+            :can-submit="canSubmit"
+            :open-menu="openComposerMenu"
+            :selected-mode-id="selectedComposerModeId"
+            :selected-style-id="selectedComposerStyleId"
+            :selected-aspect-id="selectedAspectId"
+            :selected-image-count="selectedImageCount"
+            @toggle-menu="toggleComposerMenu"
+            @select-mode="handleSelectComposerMode"
+            @select-style="handleSelectComposerStyle"
+            @select-aspect="handleSelectAspect"
+            @select-image-count="handleSelectImageCount"
+            @submit="handleSubmit"
+          />
         </div>
       </section>
 
