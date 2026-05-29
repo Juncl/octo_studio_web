@@ -1447,7 +1447,7 @@ watch(
         <header class="canvas-tabs">
           <div v-if="currentPreview" class="canvas-tab">
             <span class="canvas-tab-title">{{ getCurrentFileName() }}</span>
-            <span class="canvas-tab-close">×</span>
+            <span class="canvas-tab-close" />
           </div>
         </header>
 
@@ -1466,8 +1466,11 @@ watch(
         </div>
 
         <div class="canvas-floating-actions">
-          <button class="canvas-favorite-button" type="button">♡</button>
-          <button class="canvas-regenerate-button" type="button">↻</button>
+          <div class="canvas-actions-group">
+            <button class="canvas-favorite-button" type="button" />
+            <button class="canvas-share-button" type="button" />
+          </div>
+          <span class="canvas-actions-divider" />
           <a
             :href="currentPreview ?? '#'"
             target="_blank"

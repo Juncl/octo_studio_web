@@ -301,10 +301,10 @@ onUnmounted(() => document.removeEventListener("click", handleDocumentClick))
 .composer {
   position: relative;
   container-type: inline-size;
-  min-height: 140px;
-  padding: 16px 18px;
+  min-height: 150px;
+  padding: 16px 16px 18px 16px;
   border: 1px solid transparent;
-  border-radius: 16px;
+  border-radius: 24px;
   background:
     linear-gradient(#fff, #fff) padding-box,
     linear-gradient(
@@ -326,9 +326,9 @@ onUnmounted(() => document.removeEventListener("click", handleDocumentClick))
 .composer-input-row {
   display: grid;
   grid-template-columns: 52px minmax(0, 1fr);
-  gap: 12px;
+  gap: 8px;
   align-items: start;
-  min-height: 70px;
+  min-height: 64px;
 }
 
 .composer-ref-btn {
@@ -354,7 +354,7 @@ onUnmounted(() => document.removeEventListener("click", handleDocumentClick))
 
 .composer-input {
   width: 100%;
-  min-height: 76px;
+  min-height: 64px;
   resize: none;
   border: 0;
   outline: none;
@@ -373,8 +373,7 @@ onUnmounted(() => document.removeEventListener("click", handleDocumentClick))
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 4px;
-  padding-left: 2px;
+  margin-top: 18px;
 }
 
 .composer-toolbar button {
@@ -511,11 +510,11 @@ onUnmounted(() => document.removeEventListener("click", handleDocumentClick))
   content: "";
   position: absolute;
   left: 50%;
-  top: calc(50% - 4px);
+  top: calc(50% - 0px);
   width: 52px;
   height: 52px;
   pointer-events: none;
-  background: url(/studio/IconSend-blue.svg) center 5px / 57px 58px no-repeat !important;
+  background: url(/studio/IconSend-blue.svg) center 6px / 52px 52px no-repeat !important;
   transform: translate(-50%, -50%);
 }
 
