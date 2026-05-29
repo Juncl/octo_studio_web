@@ -239,6 +239,7 @@ const input = ref("")
 const loading = ref(false)
 const typingMessageId = ref<string | null>(null)
 const selectedPreview = ref<string | null>(null)
+const selectedPreviewMessageId = ref<string | null>(null)
 const scrollRef = ref<HTMLDivElement | null>(null)
 const openComposerMenu = ref<ComposerMenu | null>(null)
 const selectedComposerModeId = ref("image")
@@ -309,6 +310,42 @@ const selectedComposerStyle = computed(() => {
 const currentPreview = computed(() => {
   return selectedPreview.value ?? primaryImage.value ?? images.value[0] ?? null
 })
+const currentPreviewMessageId = computed(() => {
+  if (!currentPreview.value) return null
+
+  if (
+    selectedPreviewMessageId.value &&
+    messages.value.some((message) => {
+      return (
+        message.id === selectedPreviewMessageId.value &&
+        message.imageUrls?.includes(currentPreview.value ?? "")
+      )
+    })
+  ) {
+    return selectedPreviewMessageId.value
+  }
+
+  return (
+    messages.value.find((message) => {
+      return message.imageUrls?.includes(currentPreview.value ?? "")
+    })?.id ?? null
+  )
+})
+const allConversationImages = computed(() => {
+  const urls = new Set<string>()
+
+  for (const message of messages.value) {
+    for (const url of message.imageUrls ?? []) {
+      urls.add(url)
+    }
+  }
+
+  for (const url of images.value) {
+    urls.add(url)
+  }
+
+  return [...urls]
+})
 
 const hasStartedConversation = computed(() => {
   return messages.value.some((message) => message.role === "user") || images.value.length > 0
@@ -328,42 +365,10 @@ const groupedHistory = computed(() => {
 })
 
 const sideQuickItems = computed(() => {
-  const realConversations = [...conversations.value]
+  return [...conversations.value]
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, 5)
-
-  const hasVisibleConversation =
-    realConversations.length > 1 ||
-    realConversations.some((item) => {
-      return (
-        item.images.length > 0 ||
-        item.messages.some((message) => message.role === "user")
-      )
-    })
-
-  if (hasVisibleConversation) return realConversations
-
-  return [
-    createDisplayConversation("户外骑行图片"),
-    createDisplayConversation("生成一张胶片质感人像"),
-    createDisplayConversation("模拟无人机穿越雪山森林的长镜头"),
-    createDisplayConversation("静态风景图转化为 4K 竖向图片"),
-    createDisplayConversation("将背景单车替换为复古款")
-  ]
 })
-
-function createDisplayConversation(title: string): StoredConversation {
-  return {
-    id: `display_${title}`,
-    title,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    messages: [],
-    images: [],
-    primaryImage: null,
-    lastPrompt: ""
-  }
-}
 
 function nowText() {
   return new Date().toLocaleTimeString("zh-CN", {
@@ -694,6 +699,7 @@ function handleNewChat() {
   input.value = ""
   typingMessageId.value = null
   selectedPreview.value = null
+  selectedPreviewMessageId.value = null
 }
 
 function handleSelectConversation(id: string) {
@@ -707,6 +713,7 @@ function handleSelectConversation(id: string) {
   input.value = ""
   typingMessageId.value = null
   selectedPreview.value = target.primaryImage ?? target.images[0] ?? null
+  selectedPreviewMessageId.value = null
 }
 
 function handleDeleteConversation(id: string) {
@@ -718,10 +725,12 @@ function handleDeleteConversation(id: string) {
     if (next[0]) {
       activeId.value = next[0].id
       selectedPreview.value = next[0].primaryImage ?? next[0].images[0] ?? null
+      selectedPreviewMessageId.value = null
     } else {
       const created = createEmptyConversation()
       activeId.value = created.id
       selectedPreview.value = null
+      selectedPreviewMessageId.value = null
       conversations.value = [created]
       return
     }
@@ -897,6 +906,7 @@ async function submitAgentRequest(options: {
 
     if (result.type === "image_result" && nextImages.length > 0) {
       selectedPreview.value = result.primaryImage ?? nextImages[0] ?? null
+      selectedPreviewMessageId.value = assistantMessage.id
     }
 
     updateActiveConversation((conversation) => {
@@ -1048,17 +1058,42 @@ function getPreviewGridClass() {
 function getCurrentPreviewIndex() {
   if (!currentPreview.value) return "-"
 
-  const index = images.value.findIndex((item) => item === currentPreview.value)
+  const previewImages = currentPreviewSet.value
+  const index = previewImages.findIndex((item) => item === currentPreview.value)
 
   if (index < 0) return "-"
 
-  return `${index + 1}/${images.value.length}`
+  return `${index + 1}/${previewImages.length}`
+}
+
+function selectPreview(url: string, messageId?: string) {
+  selectedPreview.value = url
+  selectedPreviewMessageId.value = messageId ?? currentPreviewMessageId.value
+}
+
+function isMessagePreviewSelected(message: ChatMessage, url: string) {
+  return (
+    currentPreview.value === url &&
+    currentPreviewMessageId.value === message.id
+  )
+}
+
+function isDetailPreviewSelected(url: string) {
+  return (
+    currentPreview.value === url &&
+    (!currentPreviewMessageId.value ||
+      selectedPreviewMessageId.value === currentPreviewMessageId.value)
+  )
 }
 
 function getCurrentFileName() {
   if (!currentPreview.value) return ""
 
   const sourceMessage = messages.value.find((message) => {
+    if (currentPreviewMessageId.value) {
+      return message.id === currentPreviewMessageId.value
+    }
+
     return message.imageUrls?.includes(currentPreview.value ?? "")
   })
 
@@ -1076,7 +1111,7 @@ function getCurrentFileName() {
 
   if (urlFileName) return urlFileName
 
-  const index = images.value.findIndex((item) => item === currentPreview.value)
+  const index = currentPreviewSet.value.findIndex((item) => item === currentPreview.value)
   const suffix = index >= 0 ? index + 1 : 1
   const title = workspaceTitle.value || "Octo Studio"
 
@@ -1110,6 +1145,28 @@ function getGeneratedTitle(message: ChatMessage) {
 
   return getFeatureTitle(prompt, activeAgentState.value ?? undefined)
 }
+
+const currentPreviewSet = computed(() => {
+  if (!currentPreview.value) return images.value
+
+  if (currentPreviewMessageId.value) {
+    const selectedMessage = messages.value.find((message) => {
+      return message.id === currentPreviewMessageId.value
+    })
+
+    if (selectedMessage?.imageUrls && selectedMessage.imageUrls.length > 0) {
+      return selectedMessage.imageUrls
+    }
+  }
+
+  const sourceMessage = messages.value.find((message) => {
+    return message.imageUrls?.includes(currentPreview.value ?? "")
+  })
+
+  return sourceMessage?.imageUrls && sourceMessage.imageUrls.length > 0
+    ? sourceMessage.imageUrls
+    : images.value
+})
 
 function getFileNameFromUrl(url: string) {
   if (url.startsWith("data:")) return ""
@@ -1153,6 +1210,7 @@ onMounted(() => {
       activeConversationFromStorage.primaryImage ??
       activeConversationFromStorage.images[0] ??
       null
+    selectedPreviewMessageId.value = null
 
     return
   }
@@ -1161,6 +1219,7 @@ onMounted(() => {
   conversations.value = [initial]
   activeId.value = initial.id
   selectedPreview.value = null
+  selectedPreviewMessageId.value = null
   saveConversations([initial])
   saveActiveConversationId(initial.id)
 })
@@ -1196,15 +1255,20 @@ watch(
 )
 
 watch(
-  () => [images.value, primaryImage.value, selectedPreview.value],
+  () => [allConversationImages.value, images.value, primaryImage.value, selectedPreview.value],
   () => {
-    if (images.value.length === 0) {
+    if (allConversationImages.value.length === 0) {
       selectedPreview.value = null
+      selectedPreviewMessageId.value = null
       return
     }
 
-    if (!selectedPreview.value || !images.value.includes(selectedPreview.value)) {
+    if (
+      !selectedPreview.value ||
+      !allConversationImages.value.includes(selectedPreview.value)
+    ) {
       selectedPreview.value = primaryImage.value ?? images.value[0] ?? null
+      selectedPreviewMessageId.value = null
     }
   },
   {
@@ -1522,10 +1586,10 @@ watch(
                 <div class="generated-thumbs">
                   <button
                     v-for="(url, index) in message.imageUrls"
-                    :key="url"
+                    :key="`${message.id}-${index}-${url}`"
                     type="button"
-                    :class="currentPreview === url ? 'generated-thumb active' : 'generated-thumb'"
-                    @click="selectedPreview = url"
+                    :class="isMessagePreviewSelected(message, url) ? 'generated-thumb active' : 'generated-thumb'"
+                    @click="selectPreview(url, message.id)"
                   >
                     <img
                       class="generated-thumb-image"
@@ -1766,19 +1830,19 @@ watch(
 
       <aside class="detail-panel">
         <div class="detail-cover">
-          <template v-if="images.length > 0">
+          <template v-if="currentPreviewSet.length > 0">
             <button
-              v-for="(url, index) in images"
-              :key="url"
+              v-for="(url, index) in currentPreviewSet"
+              :key="`${currentPreviewMessageId ?? 'latest'}-${index}-${url}`"
               type="button"
               :class="
-                currentPreview === url
+                isDetailPreviewSelected(url)
                   ? 'detail-preview-switch-button active'
                   : 'detail-preview-switch-button'
               "
               :aria-label="`预览第 ${index + 1} 张图片`"
-              :aria-pressed="currentPreview === url"
-              @click="selectedPreview = url"
+              :aria-pressed="isDetailPreviewSelected(url)"
+              @click="selectPreview(url, currentPreviewMessageId ?? undefined)"
             >
               <img
                 :src="url"
