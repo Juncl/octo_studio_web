@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue"
+import { computed, onMounted, onUnmounted } from "vue"
 
 export type ComposerMenu = "mode" | "style" | "settings"
 
@@ -8,6 +8,7 @@ export type ComposerModeOption = {
   label: string
   icon: string
   dividerBefore?: boolean
+  dividerAfter?: boolean
 }
 
 export type ComposerStyleOption = {
@@ -21,6 +22,8 @@ export type ComposerAspectOption = {
   label: string
   width: number
   height: number
+  pw: number
+  ph: number
 }
 
 const props = defineProps<{
@@ -46,8 +49,8 @@ const emit = defineEmits<{
 
 const composerModeOptions: ComposerModeOption[] = [
   { id: "image", label: "图片生成", icon: "▧" },
-  { id: "video", label: "视频生成", icon: "▣" },
-  { id: "upscale", label: "变清晰", icon: "HD", dividerBefore: true },
+  { id: "video", label: "视频生成", icon: "▣", dividerAfter: true },
+  { id: "upscale", label: "变清晰", icon: "HD" },
   { id: "cutout", label: "抠图", icon: "◌" },
   { id: "inpaint", label: "局部重绘", icon: "◒" },
   { id: "outpaint", label: "扩图", icon: "□" },
@@ -69,13 +72,13 @@ const composerStyleOptions: ComposerStyleOption[] = [
 ]
 
 const composerAspectOptions: ComposerAspectOption[] = [
-  { id: "1:1", label: "1:1", width: 1024, height: 1024 },
-  { id: "2:3", label: "2:3", width: 768, height: 1152 },
-  { id: "3:4", label: "3:4", width: 864, height: 1152 },
-  { id: "9:16", label: "9:16", width: 720, height: 1280 },
-  { id: "3:2", label: "3:2", width: 1152, height: 768 },
-  { id: "4:3", label: "4:3", width: 1152, height: 864 },
-  { id: "16:9", label: "16:9", width: 1280, height: 720 }
+  { id: "1:1", label: "1:1", width: 1024, height: 1024, pw: 20, ph: 20 },
+  { id: "2:3", label: "2:3", width: 768, height: 1152, pw: 12, ph: 20 },
+  { id: "3:4", label: "3:4", width: 864, height: 1152, pw: 14, ph: 20 },
+  { id: "9:16", label: "9:16", width: 720, height: 1280, pw: 10, ph: 20 },
+  { id: "3:2", label: "3:2", width: 1152, height: 768, pw: 20, ph: 12 },
+  { id: "4:3", label: "4:3", width: 1152, height: 864, pw: 20, ph: 14 },
+  { id: "16:9", label: "16:9", width: 1280, height: 720, pw: 20, ph: 10 }
 ]
 
 const composerImageCountOptions = [1, 2, 3, 4]
@@ -94,6 +97,17 @@ function handleKeyDown(event: KeyboardEvent) {
     emit("submit")
   }
 }
+
+function handleDocumentClick(e: MouseEvent) {
+  if (!props.openMenu) return
+  const menuEl = document.querySelector(".workspace-composer-menu")
+  if (menuEl && !menuEl.contains(e.target as Node)) {
+    emit("toggleMenu", props.openMenu)
+  }
+}
+
+onMounted(() => document.addEventListener("click", handleDocumentClick))
+onUnmounted(() => document.removeEventListener("click", handleDocumentClick))
 </script>
 
 <template>
@@ -102,34 +116,35 @@ function handleKeyDown(event: KeyboardEvent) {
       v-if="openMenu === 'mode'"
       class="workspace-composer-menu workspace-mode-menu"
     >
-      <button
+      <template
         v-for="option in composerModeOptions"
         :key="option.id"
-        type="button"
-        :class="
-          option.id === selectedModeId
-            ? 'workspace-menu-option workspace-mode-option active'
-            : 'workspace-menu-option workspace-mode-option'
-        "
-        @click="emit('selectMode', option)"
       >
         <span
           v-if="option.dividerBefore"
           class="workspace-menu-divider"
         />
-        <span class="workspace-menu-option-content">
-          <span class="workspace-menu-option-icon workspace-mode-option-icon">
-            {{ option.icon }}
+        <button
+          type="button"
+          :class="
+            option.id === selectedModeId
+              ? 'workspace-menu-option workspace-mode-option active'
+              : 'workspace-menu-option workspace-mode-option'
+          "
+          @click="emit('selectMode', option)"
+        >
+          <span class="workspace-menu-option-content">
+            <span class="workspace-menu-option-icon workspace-mode-option-icon">
+              {{ option.icon }}
+            </span>
+            <span class="workspace-menu-option-label">{{ option.label }}</span>
           </span>
-          <span class="workspace-menu-option-label">{{ option.label }}</span>
-          <span
-            v-if="option.id === selectedModeId"
-            class="workspace-menu-option-check"
-          >
-            ✓
-          </span>
-        </span>
-      </button>
+        </button>
+        <span
+          v-if="option.dividerAfter"
+          class="workspace-menu-divider"
+        />
+      </template>
     </div>
 
     <div
@@ -167,7 +182,7 @@ function handleKeyDown(event: KeyboardEvent) {
 
     <div
       v-if="openMenu === 'settings'"
-      class="workspace-composer-menu workspace-settings-menu"
+      class="workspace-composer-menu workspace-settings-menu img"
     >
       <header class="workspace-settings-menu-header">
         <h3 class="workspace-settings-menu-title">图片设置</h3>
@@ -187,10 +202,12 @@ function handleKeyDown(event: KeyboardEvent) {
             "
             @click="emit('selectAspect', option)"
           >
-            <span
+            <span class="workspace-aspect-preview-box">
+              <span
               class="workspace-aspect-preview"
-              :style="{ aspectRatio: `${option.width} / ${option.height}` }"
-            />
+              :style="{ width: `${option.pw}px`, height: `${option.ph}px` }"
+            ></span>
+            </span>
             <span class="workspace-aspect-label">{{ option.label }}</span>
           </button>
         </div>
@@ -233,7 +250,7 @@ function handleKeyDown(event: KeyboardEvent) {
         class="composer-mode-btn"
         type="button"
         :aria-expanded="openMenu === 'mode'"
-        @click="emit('toggleMenu', 'mode')"
+        @click.stop="emit('toggleMenu', 'mode')"
       >
         <span class="composer-btn-label">{{ selectedMode.label }}</span>
         <span class="composer-btn-caret" />
@@ -243,7 +260,7 @@ function handleKeyDown(event: KeyboardEvent) {
         class="composer-style-btn"
         type="button"
         :aria-expanded="openMenu === 'style'"
-        @click="emit('toggleMenu', 'style')"
+        @click.stop="emit('toggleMenu', 'style')"
       >
         <span class="composer-btn-label">{{ selectedStyle.label }}</span>
         <span class="composer-btn-caret" />
@@ -255,7 +272,7 @@ function handleKeyDown(event: KeyboardEvent) {
         aria-label="生成参数"
         title="生成参数"
         :aria-expanded="openMenu === 'settings'"
-        @click="emit('toggleMenu', 'settings')"
+        @click.stop="emit('toggleMenu', 'settings')"
       >
         <span class="composer-btn-icon" />
       </button>
@@ -285,7 +302,7 @@ function handleKeyDown(event: KeyboardEvent) {
   position: relative;
   container-type: inline-size;
   min-height: 140px;
-  padding: 12px 16px;
+  padding: 16px 18px;
   border: 1px solid transparent;
   border-radius: 16px;
   background:
@@ -370,7 +387,7 @@ function handleKeyDown(event: KeyboardEvent) {
   padding: 4px 12px;
   border: 0;
   border-radius: 999px;
-  background: #f3f3f3;
+  background: var(--studio-btn-defalut);
   color: #191919;
   font-size: 14px;
   line-height: 22px;
@@ -378,38 +395,12 @@ function handleKeyDown(event: KeyboardEvent) {
 }
 
 .composer-toolbar button:hover {
-  background: #e8e9ec;
+  background: var(--studio-btn-hover);
 }
 
 .composer-mode-btn,
 .composer-style-btn {
   gap: 6px;
-}
-
-.composer-mode-btn::before {
-  content: "";
-  width: 16px;
-  height: 16px;
-  flex: 0 0 16px;
-  background: var(--studio-blue);
-  mask: url("/studio/IconImg.svg") center / contain no-repeat;
-  -webkit-mask: url("/studio/IconImg.svg") center / contain no-repeat;
-}
-
-.composer-style-btn::before {
-  content: "";
-  width: 16px;
-  height: 16px;
-  flex: 0 0 16px;
-  border-radius: 4px;
-  background: url("/studio/studioModel1.png") center / cover no-repeat;
-}
-
-@container (max-width: 520px) {
-  .composer .composer-mode-btn::before,
-  .composer .composer-style-btn::before {
-    display: none;
-  }
 }
 
 .composer-btn-label {
@@ -427,10 +418,7 @@ function handleKeyDown(event: KeyboardEvent) {
   flex: 0 0 16px;
   overflow: hidden;
   font-size: 0;
-  background: var(--studio-muted);
-  mask: url("/studio/chevron_down.svg") center / contain no-repeat;
-  -webkit-mask: url("/studio/chevron_down.svg") center / contain no-repeat;
-  transform: translateY(-1px);
+  background: url("/studio/chevron_down.svg") center / contain no-repeat;
 }
 
 .composer-mode-btn {
@@ -451,13 +439,11 @@ function handleKeyDown(event: KeyboardEvent) {
   white-space: nowrap;
 }
 
-.composer-settings-btn,
-.composer-preset-btn {
+.composer-toolbar .composer-settings-btn,
+.composer-toolbar .composer-preset-btn {
   width: 32px;
-  min-width: 32px;
-  max-width: 32px;
   height: 32px;
-  min-height: 32px;
+  min-width: 32px;
   max-height: 32px;
   padding: 0;
   font-size: 0;
@@ -465,8 +451,8 @@ function handleKeyDown(event: KeyboardEvent) {
 
 .composer-btn-icon {
   pointer-events: none;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   display: block;
   overflow: hidden;
   font-size: 0;
@@ -525,23 +511,12 @@ function handleKeyDown(event: KeyboardEvent) {
   content: "";
   position: absolute;
   left: 50%;
-  top: calc(50% + 2px);
+  top: calc(50% - 4px);
   width: 52px;
   height: 52px;
   pointer-events: none;
   background: url(/studio/IconSend-blue.svg) center 5px / 57px 58px no-repeat !important;
   transform: translate(-50%, -50%);
-}
-
-.composer-send-btn--loading::before {
-  width: 18px;
-  height: 18px;
-  top: 50%;
-  background: none;
-  border-radius: 999px;
-  border: 2px solid rgba(0, 0, 0, 0.15);
-  border-top-color: var(--studio-blue);
-  animation: composerSpin 0.8s linear infinite;
 }
 
 .composer-send-btn:disabled {
@@ -553,58 +528,67 @@ function handleKeyDown(event: KeyboardEvent) {
 .workspace-composer-menu {
   position: absolute;
   z-index: 30;
-  bottom: 78px;
+  bottom: 60px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 1);
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.16);
   backdrop-filter: blur(18px);
 }
 
+.workspace-composer-menu.img {
+  left: 188px;
+}
+
 .workspace-mode-menu {
   left: 16px;
   width: 175px;
   padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.16);
 }
 
 .workspace-menu-option {
   width: 100%;
-  height: 40px;
+  height: 36px;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 12px;
+  padding: 0 8px;
   border: 0;
   border-radius: 8px;
   background: transparent;
   color: #191919;
   text-align: left;
   font-size: 14px;
-  position: relative;
 }
 
-.workspace-menu-option.active,
+.workspace-menu-option.active {
+  background: #f3f3f3;
+}
+
 .workspace-menu-option:hover {
-  background: #f0f1f3;
+  background: #dfdfdf;
 }
 
 .workspace-menu-divider {
-  display: block;
   height: 1px;
   margin: 0 12px;
   background: rgba(0, 0, 0, 0.1);
-  position: absolute;
 }
 
 .workspace-menu-option-content {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   width: 100%;
 }
 
 .workspace-menu-option-icon {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   display: grid;
   place-items: center;
   flex-shrink: 0;
@@ -614,61 +598,45 @@ function handleKeyDown(event: KeyboardEvent) {
 }
 
 .workspace-mode-option-icon {
-  border-radius: 0;
-  background-color: currentColor;
-  background-image: none;
-  mask: url("/studio/imgCreate1.svg") center / contain no-repeat;
-  -webkit-mask: url("/studio/imgCreate1.svg") center / contain no-repeat;
+  background: url("/studio/imgCreate1.svg") center / contain no-repeat;
 }
 
 .workspace-mode-option:nth-of-type(2) .workspace-mode-option-icon {
-  color: #704cff;
-  mask-image: url("/studio/imgCreate2.svg");
-  -webkit-mask-image: url("/studio/imgCreate2.svg");
+  background-image: url("/studio/imgCreate2.svg");
 }
 
 .workspace-mode-option:nth-of-type(3) .workspace-mode-option-icon {
-  color: #00a6d6;
-  mask-image: url("/studio/imgCreate3.svg");
-  -webkit-mask-image: url("/studio/imgCreate3.svg");
+  background-image: url("/studio/imgCreate3.svg");
 }
 
 .workspace-mode-option:nth-of-type(4) .workspace-mode-option-icon {
-  color: #111827;
-  mask-image: url("/studio/imgCreate4.svg");
-  -webkit-mask-image: url("/studio/imgCreate4.svg");
+  background-image: url("/studio/imgCreate4.svg");
 }
 
 .workspace-mode-option:nth-of-type(5) .workspace-mode-option-icon {
-  color: #00ad6f;
-  mask-image: url("/studio/imgCreate5.svg");
-  -webkit-mask-image: url("/studio/imgCreate5.svg");
+  background-image: url("/studio/imgCreate5.svg");
 }
 
 .workspace-mode-option:nth-of-type(6) .workspace-mode-option-icon {
-  color: #2563eb;
-  mask-image: url("/studio/imgCreate6.svg");
-  -webkit-mask-image: url("/studio/imgCreate6.svg");
+  background-image: url("/studio/imgCreate6.svg");
 }
 
 .workspace-mode-option:nth-of-type(7) .workspace-mode-option-icon {
-  color: #c026d3;
-  mask-image: url("/studio/imgCreate7.svg");
-  -webkit-mask-image: url("/studio/imgCreate7.svg");
+  background-image: url("/studio/imgCreate7.svg");
 }
 
 .workspace-menu-option-label {
   overflow: hidden;
   color: #191919;
   font-size: 14px;
-  line-height: 20px;
+  line-height: 22px;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
 .workspace-menu-option-check {
   margin-left: auto;
-  color: #111827;
+  color: #191919;
   font-size: 14px;
 }
 
@@ -683,7 +651,7 @@ function handleKeyDown(event: KeyboardEvent) {
 }
 
 .workspace-style-menu-header {
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 
 .workspace-style-menu-title {
@@ -691,6 +659,7 @@ function handleKeyDown(event: KeyboardEvent) {
   color: #191919;
   font-size: 14px;
   font-weight: 600;
+  text-align: left;
 }
 
 .workspace-style-menu-grid {
@@ -768,12 +737,12 @@ function handleKeyDown(event: KeyboardEvent) {
 
 .workspace-settings-menu {
   left: 16px;
-  width: min(420px, calc(100vw - 80px));
+  width: min(530px, calc(100vw - 80px));
   padding: 16px;
 }
 
 .workspace-settings-menu-header {
-  margin-bottom: 18px;
+  margin-bottom: 16px;
 }
 
 .workspace-settings-menu-title {
@@ -781,6 +750,8 @@ function handleKeyDown(event: KeyboardEvent) {
   color: #191919;
   font-size: 14px;
   font-weight: 600;
+  text-align: left;
+  line-height: 22px;
 }
 
 .workspace-settings-section {
@@ -792,10 +763,12 @@ function handleKeyDown(event: KeyboardEvent) {
 }
 
 .workspace-settings-section-title {
-  margin: 0 0 10px;
+  margin: 0 0 8px;
   color: var(--studio-muted);
   font-size: 12px;
-  font-weight: 600;
+  line-height: 18px;
+  font-weight: 400;
+  text-align: left;
 }
 
 .workspace-aspect-options,
@@ -803,12 +776,12 @@ function handleKeyDown(event: KeyboardEvent) {
   display: grid;
   overflow: hidden;
   border-radius: 8px;
-  background: #f1f1f2;
+  background: #F4F4F4;
 }
 
 .workspace-aspect-options {
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  min-height: 62px;
+  min-height: 54px;
   gap: 4px;
   padding: 4px;
 }
@@ -818,7 +791,7 @@ function handleKeyDown(event: KeyboardEvent) {
   min-width: 0;
   border: 0;
   background: transparent;
-  color: #111827;
+  color: #191919;
 }
 
 .workspace-aspect-option {
@@ -833,10 +806,8 @@ function handleKeyDown(event: KeyboardEvent) {
 
 .workspace-aspect-option.active,
 .workspace-count-option.active {
-  border-color: var(--studio-blue);
-  background: #eef5ff;
-  color: var(--studio-blue);
-  box-shadow: 0 1px 3px rgba(18, 103, 255, 0.14);
+  border-color: #fff;
+  background: #fff;
 }
 
 .workspace-aspect-option:hover,
@@ -844,11 +815,16 @@ function handleKeyDown(event: KeyboardEvent) {
   background: rgba(255, 255, 255, 0.78);
 }
 
+.workspace-aspect-preview-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+}
 .workspace-aspect-preview {
-  width: 16px;
-  max-height: 20px;
-  min-height: 10px;
   display: block;
+  flex-shrink: 0;
   border: 1.5px solid #111827;
   border-radius: 2px;
 }
@@ -865,16 +841,15 @@ function handleKeyDown(event: KeyboardEvent) {
 
 .workspace-count-options {
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  height: 40px;
   padding: 4px;
   gap: 4px;
 }
 
 .workspace-count-option {
-  height: 32px;
-  border-radius: 7px;
+  height: 28px;
+  border-radius: 8px;
   border: 1px solid transparent;
-  font-size: 14px;
+  font-size: 12px;
 }
 
 @keyframes composerSpin {

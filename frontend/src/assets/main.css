@@ -50,7 +50,7 @@ textarea:disabled {
   --studio-sidebar: linear-gradient(166deg, #ffffff 0%, #fdfeff 48%, #e9f5ff 99%);
   --studio-line: rgba(0, 0, 0, 0.1);
   --studio-text: #191919;
-  --studio-muted: rgba(23, 24, 28, 0.55);
+  --studio-muted: rgba(25, 25, 25, 0.6);
   --studio-blue: #0A59F7;
   --studio-bg: rgba(10, 89, 247, 0.08);
   --studio-cyan: #09b7e8;
@@ -328,6 +328,7 @@ textarea:disabled {
 .conversation-scroll {
   height: calc(100vh - 204px);
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 12px 24px 30px;
 }
 
@@ -528,6 +529,7 @@ textarea:disabled {
   display: grid;
   grid-template-rows: 54px minmax(0, 1fr);
   background: #fff;
+  overflow: hidden;
 }
 
 .canvas-tabs {
