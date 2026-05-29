@@ -1067,7 +1067,7 @@ textarea:disabled {
   width: 14px;
   height: 14px;
   flex: 0 0 14px;
-  background: url("/studio/picture_star_fill.svg") center / contain no-repeat;
+  background: url("/studio/wand_and_stars.svg") center / contain no-repeat;
   filter: brightness(0) invert(1);
 }
 
