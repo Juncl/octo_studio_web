@@ -514,7 +514,7 @@ onUnmounted(() => document.removeEventListener("click", handleDocumentClick))
   width: 52px;
   height: 52px;
   pointer-events: none;
-  background: url(/studio/IconSend-blue.svg) center 6px / 52px 52px no-repeat !important;
+  background: url(/studio/IconSend-blue.svg) center 6px / 50px 50px no-repeat !important;
   transform: translate(-50%, -50%);
 }
 
