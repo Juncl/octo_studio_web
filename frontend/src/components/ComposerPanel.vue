@@ -302,8 +302,7 @@ onUnmounted(() => document.removeEventListener("click", handleDocumentClick))
   position: relative;
   container-type: inline-size;
   min-height: 150px;
-  padding: 16px 16px 18px 16px;
-  border: 1px solid transparent;
+  padding: 16px 14px 18px;
   border-radius: 24px;
   background:
     linear-gradient(#fff, #fff) padding-box,
