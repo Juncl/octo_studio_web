@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from "vue"
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import ComposerPanel from "./ComposerPanel.vue"
 import StudioEnlarging, {
   type OutpaintGeneratePayload
@@ -275,8 +275,6 @@ const openComposerMenu = ref<ComposerMenu | null>(null)
 const selectedComposerModeId = ref("image")
 const defaultComposerStyleId = "qianwen"
 const defaultAspectId = "1:1"
-const workspaceToolMode = ref<WorkspaceToolMode>("preview")
-const outpaintSourceImage = ref<OutpaintSourceImage | null>(null)
 
 const activeConversation = computed(() => {
   return conversations.value.find((item) => item.id === activeId.value)
@@ -1461,7 +1459,35 @@ function getResultSummary() {
   return `根据你的描述生成图片：${lastPrompt.value}`
 }
 
+function startDrag(event: MouseEvent) {
+  event.preventDefault()
+  isDragging.value = true
+  document.body.style.cursor = "col-resize"
+  document.body.style.userSelect = "none"
+}
+
+function onDrag(event: MouseEvent) {
+  if (!isDragging.value) return
+
+  const newWidth = Math.round(
+    Math.min(Math.max(event.clientX, 160), 360)
+  )
+
+  sidebarWidth.value = newWidth
+}
+
+function stopDrag() {
+  if (!isDragging.value) return
+
+  isDragging.value = false
+  document.body.style.cursor = ""
+  document.body.style.userSelect = ""
+}
+
 onMounted(() => {
+  document.addEventListener("mousemove", onDrag)
+  document.addEventListener("mouseup", stopDrag)
+
   const loaded = loadConversations()
   const activeFromStorage = loadActiveConversationId()
 
@@ -1491,6 +1517,11 @@ onMounted(() => {
   selectedPreviewMessageId.value = null
   saveConversations([initial])
   saveActiveConversationId(initial.id)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener("mousemove", onDrag)
+  document.removeEventListener("mouseup", stopDrag)
 })
 
 watch(
@@ -1548,7 +1579,15 @@ watch(
 
 <template>
   <div class="octo-shell">
-    <aside class="octo-sidebar">
+    <aside class="octo-sidebar" :style="{ width: sidebarWidth + 'px' }">
+      <button
+        class="sidebar-drag-handle"
+        type="button"
+        aria-label="拖拽调整侧边栏"
+        @mousedown="startDrag"
+      >
+        <span class="sidebar-drag-line" />
+      </button>
       <button class="new-chat-button" @click="handleNewChat">
         <span class="new-chat-plus">＋</span>
         <span class="new-chat-label">新建对话</span>
@@ -1754,19 +1793,19 @@ watch(
             </div>
           </div>
 
-          <div class="canvas-floating-actions">
-            <button class="canvas-favorite-button" type="button">♡</button>
-            <button class="canvas-regenerate-button" type="button">↻</button>
-            <a
-              :href="currentPreview ?? '#'"
-              target="_blank"
-              rel="noreferrer"
-              :class="currentPreview ? 'canvas-download-link' : 'canvas-download-link disabled-link'"
-            >
-              下载
-            </a>
-          </div>
-        </section>
+        <div class="canvas-floating-actions">
+          <button class="canvas-favorite-button" type="button">♡</button>
+          <button class="canvas-regenerate-button" type="button">↻</button>
+          <a
+            :href="currentPreview ?? '#'"
+            target="_blank"
+            rel="noreferrer"
+            :class="currentPreview ? 'canvas-download-link' : 'canvas-download-link disabled-link'"
+          >
+            下载
+          </a>
+        </div>
+      </section>
 
         <aside class="detail-panel">
           <div class="detail-cover">

@@ -68,7 +68,7 @@ textarea:disabled {
   min-height: 0;
   margin: 0;
   display: grid;
-  grid-template-columns: 296px minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr);
   overflow: hidden;
   border-radius: 0;
   background: var(--studio-bg);
@@ -77,10 +77,45 @@ textarea:disabled {
 /* Sidebar */
 
 .octo-sidebar {
+  position: relative;
   height: 100%;
   padding: 12px 12px 24px 12px;
   background: var(--studio-sidebar);
   border-right: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.sidebar-drag-handle {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%) translateX(100%) rotate(180deg);
+  z-index: 10;
+  width: 12px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-right: none;
+  border-radius: 6px 0 0 6px;
+  background: #fff;
+  box-shadow: -1px 0 4px 0 rgba(0, 0, 0, 0.12);
+  backdrop-filter: blur(8px);
+  cursor: col-resize;
+  padding: 0;
+  outline: none;
+}
+
+.sidebar-drag-handle:active {
+  background: #f5f5f5;
+}
+
+.sidebar-drag-line {
+  width: 3px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.3);
+  pointer-events: none;
 }
 
 .new-chat-button {
@@ -134,6 +169,12 @@ textarea:disabled {
   color: #191919;
   font-size: 12px;
   font-weight: 750;
+}
+
+.studio-brand-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .studio-brand-icon {
@@ -1227,7 +1268,7 @@ textarea:disabled {
 @media (max-width: 1100px) {
   .octo-shell {
     min-width: 0;
-    grid-template-columns: 240px minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr);
   }
 
   .workspace-main {
