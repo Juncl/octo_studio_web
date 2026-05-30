@@ -496,6 +496,66 @@ export async function cutoutImageService(args: {
   })
 }
 
+export async function outpaintingImageService(args: {
+  prompt: string
+  imageBase64: string
+  left: number
+  right: number
+  top: number
+  bottom: number
+  numImage?: number
+  userIdx?: string
+  pollIntervalMs?: number
+  maxPollCount?: number
+  maxCreateRetries?: number
+  createTimeoutMs?: number
+}): Promise<GenerateImageToolResult> {
+  if (!args.imageBase64.startsWith("data:image/")) {
+    throw new Error("outpainting requires imageBase64 as a data URL.")
+  }
+
+  const distances = [args.left, args.right, args.top, args.bottom]
+
+  if (
+    distances.some((value) => {
+      return !Number.isFinite(value) || value < 0
+    })
+  ) {
+    throw new Error("outpainting distances must be non-negative numbers.")
+  }
+
+  if (distances.every((value) => value === 0)) {
+    throw new Error("outpainting requires at least one expanded direction.")
+  }
+
+  const userIdx = args.userIdx ?? process.env.IMAGE_USER_IDX ?? "l00423136"
+  const createPayload: CreateTaskPayload = {
+    user: {
+      idx: userIdx
+    },
+    task_type: "outpainting",
+    args: {
+      prompt: args.prompt,
+      image_base64: args.imageBase64,
+      left: args.left,
+      right: args.right,
+      top: args.top,
+      bottom: args.bottom,
+      num_image: args.numImage ?? 1
+    }
+  }
+
+  return runImageTask({
+    createPayload,
+    toolAction: "outpainting",
+    taskType: "outpainting",
+    pollIntervalMs: args.pollIntervalMs,
+    maxPollCount: args.maxPollCount,
+    maxCreateRetries: args.maxCreateRetries,
+    createTimeoutMs: args.createTimeoutMs
+  })
+}
+
 async function runImageTask(
   options: RunImageTaskOptions
 ): Promise<GenerateImageToolResult> {

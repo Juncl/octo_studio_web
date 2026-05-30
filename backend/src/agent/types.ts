@@ -4,6 +4,7 @@ export type ImageToolAction =
   | "generate_image"
   | "super_resolution"
   | "cutout"
+  | "outpainting"
   | "chat"
   | "prompt_only"
 
@@ -76,6 +77,18 @@ export type GenerateImageToolArgs = {
   maxPollCount?: number
   maxCreateRetries?: number
   createTimeoutMs?: number
+}
+
+export type OutpaintToolArgs = {
+  prompt: string
+  imageBase64: string
+  left: number
+  right: number
+  top: number
+  bottom: number
+  realWidth?: number
+  realHeight?: number
+  numImage?: number
 }
 
 export type GenerateImageToolResult = {

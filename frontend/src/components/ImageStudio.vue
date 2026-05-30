@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue"
 import ComposerPanel from "./ComposerPanel.vue"
+import StudioEnlarging, {
+  type OutpaintGeneratePayload
+} from "./studioEnlarging/StudioEnlarging.vue"
 
 type ChatMessage = {
   id: string
@@ -8,9 +11,21 @@ type ChatMessage = {
   content: string
   imageUrls?: string[]
   fileName?: string
+  generationInfo?: GenerationInfo
   createdAt: string
   typing?: boolean
   pending?: boolean
+}
+
+type GenerationInfo = {
+  modeId?: string
+  styleModel?: string
+  aspectRatio?: string
+  numImage?: number
+  width?: number
+  height?: number
+  prompt?: string
+  taskId?: string
 }
 
 type ClientAgentState = {
@@ -64,9 +79,23 @@ type AgentApiResponse = {
   state?: Partial<ClientAgentState>
 }
 
-type ImageToolAction = "generate_image" | "super_resolution" | "cutout"
+type ImageToolAction =
+  | "generate_image"
+  | "super_resolution"
+  | "cutout"
+  | "outpainting"
 
 type ComposerMenu = "mode" | "style" | "settings"
+type WorkspaceToolMode = "preview" | "outpaint"
+
+type OutpaintSourceImage = {
+  id: string
+  name: string
+  src: string
+  base64: string
+  width: number
+  height: number
+}
 
 type ComposerModeOption = {
   id: string
@@ -246,6 +275,8 @@ const openComposerMenu = ref<ComposerMenu | null>(null)
 const selectedComposerModeId = ref("image")
 const defaultComposerStyleId = "qianwen"
 const defaultAspectId = "1:1"
+const workspaceToolMode = ref<WorkspaceToolMode>("preview")
+const outpaintSourceImage = ref<OutpaintSourceImage | null>(null)
 
 const activeConversation = computed(() => {
   return conversations.value.find((item) => item.id === activeId.value)
@@ -287,15 +318,20 @@ const canSubmit = computed(() => {
   return Boolean(input.value.trim())
 })
 const detailStyleTags = computed(() => {
+  const info = currentPreviewGenerationInfo.value
+  const modeLabel = getComposerModeLabel(info.modeId)
+  const styleLabel = getComposerStyleLabel(info.styleModel)
+  const aspectRatio = info.aspectRatio ?? "-"
+  const numImage = info.numImage ?? currentPreviewSet.value.length
   const tags = [
-    selectedComposerMode.value.label,
-    selectedComposerStyle.value.label,
-    selectedAspectId.value,
-    `${selectedImageCount.value}张`
+    modeLabel,
+    styleLabel,
+    aspectRatio,
+    `${numImage}张`
   ]
 
-  if (images.value.length > 0) {
-    tags.push(`${images.value.length}张结果`)
+  if (currentPreviewSet.value.length > 0) {
+    tags.push(`${currentPreviewSet.value.length}张结果`)
   }
 
   return tags
@@ -336,6 +372,56 @@ const currentPreviewMessageId = computed(() => {
       return message.imageUrls?.includes(currentPreview.value ?? "")
     })?.id ?? null
   )
+})
+const currentPreviewSourceMessage = computed(() => {
+  if (!currentPreview.value) return null
+
+  if (currentPreviewMessageId.value) {
+    return (
+      messages.value.find((message) => {
+        return message.id === currentPreviewMessageId.value
+      }) ?? null
+    )
+  }
+
+  return (
+    messages.value.find((message) => {
+      return message.imageUrls?.includes(currentPreview.value ?? "")
+    }) ?? null
+  )
+})
+const currentPreviewPrompt = computed(() => {
+  return (
+    currentPreviewSourceMessage.value?.generationInfo?.prompt ??
+    getPromptBeforeMessage(currentPreviewSourceMessage.value?.id)
+  )
+})
+const currentPreviewGenerationInfo = computed<GenerationInfo>(() => {
+  const sourceMessage = currentPreviewSourceMessage.value
+  const fallbackState = activeAgentState.value
+
+  return {
+    modeId: sourceMessage?.generationInfo?.modeId ?? selectedComposerModeId.value,
+    styleModel:
+      sourceMessage?.generationInfo?.styleModel ??
+      fallbackState?.styleModel ??
+      defaultComposerStyleId,
+    aspectRatio:
+      sourceMessage?.generationInfo?.aspectRatio ??
+      fallbackState?.aspectRatio ??
+      selectedAspectId.value,
+    numImage:
+      sourceMessage?.generationInfo?.numImage ??
+      fallbackState?.numImage ??
+      currentPreviewSet.value.length,
+    width: sourceMessage?.generationInfo?.width ?? fallbackState?.width,
+    height: sourceMessage?.generationInfo?.height ?? fallbackState?.height,
+    prompt: currentPreviewPrompt.value,
+    taskId:
+      sourceMessage?.generationInfo?.taskId ??
+      fallbackState?.lastTaskId ??
+      taskId.value
+  }
 })
 const allConversationImages = computed(() => {
   const urls = new Set<string>()
@@ -403,6 +489,20 @@ function getComposerTargetSize(styleModel: string, aspectRatio: string) {
     width: option.width,
     height: option.height
   }
+}
+
+function getComposerModeLabel(modeId: string | undefined) {
+  return (
+    composerModeOptions.find((option) => option.id === modeId)?.label ??
+    composerModeOptions[0].label
+  )
+}
+
+function getComposerStyleLabel(styleModel: string | undefined) {
+  return (
+    composerStyleOptions.find((option) => option.id === styleModel)?.label ??
+    composerStyleOptions[0].label
+  )
 }
 
 function createEmptyAgentState(sessionId: string): ClientAgentState {
@@ -698,6 +798,7 @@ async function sendImageAgentMessage(inputValue: {
   composerMode?: string
   requestedToolAction?: ImageToolAction
   imageBase64?: string
+  outpaintParams?: OutpaintGeneratePayload
 }): Promise<AgentApiResponse> {
   const response = await fetch("/api/agent/image", {
     method: "POST",
@@ -735,6 +836,7 @@ function handleNewChat() {
   typingMessageId.value = null
   selectedPreview.value = null
   selectedPreviewMessageId.value = null
+  closeOutpaintTool()
 }
 
 function handleSelectConversation(id: string) {
@@ -749,6 +851,7 @@ function handleSelectConversation(id: string) {
   typingMessageId.value = null
   selectedPreview.value = target.primaryImage ?? target.images[0] ?? null
   selectedPreviewMessageId.value = null
+  closeOutpaintTool()
 }
 
 function handleDeleteConversation(id: string) {
@@ -869,10 +972,49 @@ async function handleToolAction(action: ImageToolAction) {
   })
 }
 
+async function openOutpaintTool() {
+  if (!currentPreview.value || loading.value) return
+
+  try {
+    const base64 = await getCurrentPreviewBase64()
+    const size = await loadImageSize(base64)
+
+    outpaintSourceImage.value = {
+      id: currentPreviewMessageId.value ?? createId("outpaint"),
+      name: getCurrentFileName() || "当前图片.png",
+      src: currentPreview.value,
+      base64,
+      width: size.width,
+      height: size.height
+    }
+    workspaceToolMode.value = "outpaint"
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    window.alert(message)
+  }
+}
+
+function closeOutpaintTool() {
+  workspaceToolMode.value = "preview"
+  outpaintSourceImage.value = null
+}
+
+async function handleOutpaintGenerate(params: OutpaintGeneratePayload) {
+  await submitAgentRequest({
+    text: params.prompt || "扩图",
+    composerMode: "outpaint",
+    requestedToolAction: "outpainting",
+    imageBase64: params.imageBase64,
+    outpaintParams: params
+  })
+}
+
 async function submitAgentRequest(options: {
   text: string
   composerMode?: string
   requestedToolAction?: ImageToolAction
+  imageBase64?: string
+  outpaintParams?: OutpaintGeneratePayload
 }) {
   const text = options.text.trim()
 
@@ -881,7 +1023,9 @@ async function submitAgentRequest(options: {
   let imageBase64: string | undefined
 
   try {
-    if (
+    if (options.requestedToolAction === "outpainting") {
+      imageBase64 = options.imageBase64 ?? options.outpaintParams?.imageBase64
+    } else if (
       options.requestedToolAction === "super_resolution" ||
       options.requestedToolAction === "cutout"
     ) {
@@ -941,7 +1085,8 @@ async function submitAgentRequest(options: {
       clientState: requestClientState,
       composerMode: options.composerMode,
       requestedToolAction: options.requestedToolAction,
-      imageBase64
+      imageBase64,
+      outpaintParams: options.outpaintParams
     })
 
     const nextImages = result.images ?? []
@@ -949,12 +1094,42 @@ async function submitAgentRequest(options: {
       result.text ?? "已完成图片生成。"
     )
     const generatedFileName = getFeatureFileName(text, result.state)
+    const generationInfo: GenerationInfo | undefined =
+      result.type === "image_result"
+        ? {
+            modeId: options.composerMode ?? selectedComposerModeId.value,
+            styleModel:
+              result.state?.styleModel ??
+              requestClientState.styleModel ??
+              defaultComposerStyleId,
+            aspectRatio:
+              result.state?.aspectRatio ??
+              requestClientState.aspectRatio ??
+              defaultAspectId,
+            numImage:
+              options.outpaintParams?.numImage ??
+              result.state?.numImage ??
+              requestClientState.numImage ??
+              nextImages.length,
+            width:
+              options.outpaintParams?.realWidth ??
+              result.state?.width ??
+              requestClientState.width,
+            height:
+              options.outpaintParams?.realHeight ??
+              result.state?.height ??
+              requestClientState.height,
+            prompt: text,
+            taskId: result.taskId
+          }
+        : undefined
 
     const assistantMessage: ChatMessage = {
       id: createId("msg"),
       role: "assistant",
       content: "",
       imageUrls: result.type === "image_result" ? nextImages : undefined,
+      generationInfo,
       fileName:
         result.type === "image_result" && nextImages.length > 0
           ? generatedFileName
@@ -966,6 +1141,9 @@ async function submitAgentRequest(options: {
     if (result.type === "image_result" && nextImages.length > 0) {
       selectedPreview.value = result.primaryImage ?? nextImages[0] ?? null
       selectedPreviewMessageId.value = assistantMessage.id
+      if (options.requestedToolAction === "outpainting") {
+        closeOutpaintTool()
+      }
     }
 
     updateActiveConversation((conversation) => {
@@ -1068,6 +1246,21 @@ function blobToDataUrl(blob: Blob): Promise<string> {
     }
     reader.onerror = () => reject(reader.error ?? new Error("图片 base64 读取失败。"))
     reader.readAsDataURL(blob)
+  })
+}
+
+function loadImageSize(src: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+
+    img.onload = () => {
+      resolve({
+        width: img.naturalWidth,
+        height: img.naturalHeight
+      })
+    }
+    img.onerror = () => reject(new Error("图片尺寸读取失败。"))
+    img.src = src
   })
 }
 
@@ -1527,150 +1720,182 @@ watch(
         </div>
       </section>
 
-      <section class="canvas-panel">
-        <header class="canvas-tabs">
-          <div v-if="currentPreview" class="canvas-tab">
-            <span class="canvas-tab-title">{{ getCurrentFileName() }}</span>
-            <span class="canvas-tab-close" />
-          </div>
-        </header>
-
-        <div class="canvas-stage">
-          <div v-if="currentPreview" class="selected-preview-card">
-            <img
-              :src="currentPreview"
-              :alt="`当前预览图片 ${getCurrentPreviewIndex()}`"
-              class="selected-preview-image"
-            />
-          </div>
-
-          <div v-else class="empty-canvas">
-            <span class="empty-canvas-text">图片生成结果会显示在这里</span>
-          </div>
-        </div>
-
-        <div class="canvas-floating-actions">
-          <button class="canvas-favorite-button" type="button">♡</button>
-          <button class="canvas-regenerate-button" type="button">↻</button>
-          <a
-            :href="currentPreview ?? '#'"
-            target="_blank"
-            rel="noreferrer"
-            :class="currentPreview ? 'canvas-download-link' : 'canvas-download-link disabled-link'"
-          >
-            下载
-          </a>
-        </div>
+      <section
+        v-if="workspaceToolMode === 'outpaint' && outpaintSourceImage"
+        class="outpaint-workspace-panel"
+      >
+        <StudioEnlarging
+          :image="outpaintSourceImage"
+          @close="closeOutpaintTool"
+          @generate="handleOutpaintGenerate"
+        />
       </section>
 
-      <aside class="detail-panel">
-        <div class="detail-cover">
-          <template v-if="currentPreviewSet.length > 0">
-            <button
-              v-for="(url, index) in currentPreviewSet"
-              :key="`${currentPreviewMessageId ?? 'latest'}-${index}-${url}`"
-              type="button"
-              :class="
-                isDetailPreviewSelected(url)
-                  ? 'detail-preview-switch-button active'
-                  : 'detail-preview-switch-button'
-              "
-              :aria-label="`预览第 ${index + 1} 张图片`"
-              :aria-pressed="isDetailPreviewSelected(url)"
-              @click="selectPreview(url, currentPreviewMessageId ?? undefined)"
-            >
+      <template v-else>
+        <section class="canvas-panel">
+          <header class="canvas-tabs">
+            <div v-if="currentPreview" class="canvas-tab">
+              <span class="canvas-tab-title">{{ getCurrentFileName() }}</span>
+              <span class="canvas-tab-close" />
+            </div>
+          </header>
+
+          <div class="canvas-stage">
+            <div v-if="currentPreview" class="selected-preview-card">
               <img
-                :src="url"
-                :alt="`生成图片 ${index + 1}`"
-                class="detail-preview-switch-image"
+                :src="currentPreview"
+                :alt="`当前预览图片 ${getCurrentPreviewIndex()}`"
+                class="selected-preview-image"
               />
-            </button>
-          </template>
-          <div v-else class="detail-empty">暂无图片</div>
-        </div>
+            </div>
 
-        <section class="detail-section">
-          <h3 class="detail-section-title">{{ workspaceTitle }}</h3>
-          <p class="detail-section-copy">{{ getResultSummary() }}</p>
-        </section>
+            <div v-else class="empty-canvas">
+              <span class="empty-canvas-text">图片生成结果会显示在这里</span>
+            </div>
+          </div>
 
-        <section class="detail-section">
-          <h3 class="detail-section-title">生成信息</h3>
-
-          <div class="detail-row">
-            <span class="detail-row-label">模型</span>
-            <strong class="detail-row-value">{{ selectedComposerStyle.label }}</strong>
-          </div>
-          <div class="detail-row">
-            <span class="detail-row-label">比例</span>
-            <strong class="detail-row-value">{{ selectedAspectId }}</strong>
-          </div>
-          <div class="detail-row">
-            <span class="detail-row-label">分辨率</span>
-            <strong class="detail-row-value">2K</strong>
-          </div>
-          <div class="detail-row">
-            <span class="detail-row-label">数量</span>
-            <strong class="detail-row-value">{{ selectedImageCount }}</strong>
-          </div>
-          <div class="detail-row">
-            <span class="detail-row-label">当前</span>
-            <strong class="detail-row-value">{{ getCurrentPreviewIndex() }}</strong>
+          <div class="canvas-floating-actions">
+            <button class="canvas-favorite-button" type="button">♡</button>
+            <button class="canvas-regenerate-button" type="button">↻</button>
+            <a
+              :href="currentPreview ?? '#'"
+              target="_blank"
+              rel="noreferrer"
+              :class="currentPreview ? 'canvas-download-link' : 'canvas-download-link disabled-link'"
+            >
+              下载
+            </a>
           </div>
         </section>
 
-        <section class="detail-section">
-          <h3 class="detail-section-title">提示词</h3>
-          <p class="detail-prompt-text">{{ lastPrompt || "暂无提示词" }}</p>
+        <aside class="detail-panel">
+          <div class="detail-cover">
+            <template v-if="currentPreviewSet.length > 0">
+              <button
+                v-for="(url, index) in currentPreviewSet"
+                :key="`${currentPreviewMessageId ?? 'latest'}-${index}-${url}`"
+                type="button"
+                :class="
+                  isDetailPreviewSelected(url)
+                    ? 'detail-preview-switch-button active'
+                    : 'detail-preview-switch-button'
+                "
+                :aria-label="`预览第 ${index + 1} 张图片`"
+                :aria-pressed="isDetailPreviewSelected(url)"
+                @click="selectPreview(url, currentPreviewMessageId ?? undefined)"
+              >
+                <img
+                  :src="url"
+                  :alt="`生成图片 ${index + 1}`"
+                  class="detail-preview-switch-image"
+                />
+              </button>
+            </template>
+            <div v-else class="detail-empty">暂无图片</div>
+          </div>
 
-          <button
-            class="regenerate-primary"
-            type="button"
-            :disabled="loading || !lastPrompt"
-            @click="
-              () => {
-                if (lastPrompt) input = lastPrompt
-              }
-            "
-          >
-            再次生成
-          </button>
+          <section class="detail-section">
+            <h3 class="detail-section-title">{{ workspaceTitle }}</h3>
+            <p class="detail-section-copy">{{ getResultSummary() }}</p>
+          </section>
 
-          <div class="detail-action-grid">
+          <section class="detail-section">
+            <h3 class="detail-section-title">生成信息</h3>
+
+            <div class="detail-row">
+              <span class="detail-row-label">模型</span>
+              <strong class="detail-row-value">
+                {{ getComposerStyleLabel(currentPreviewGenerationInfo.styleModel) }}
+              </strong>
+            </div>
+            <div class="detail-row">
+              <span class="detail-row-label">比例</span>
+              <strong class="detail-row-value">
+                {{ currentPreviewGenerationInfo.aspectRatio ?? "-" }}
+              </strong>
+            </div>
+            <div class="detail-row">
+              <span class="detail-row-label">分辨率</span>
+              <strong class="detail-row-value">
+                {{
+                  currentPreviewGenerationInfo.width && currentPreviewGenerationInfo.height
+                    ? `${currentPreviewGenerationInfo.width} x ${currentPreviewGenerationInfo.height}`
+                    : "-"
+                }}
+              </strong>
+            </div>
+            <div class="detail-row">
+              <span class="detail-row-label">数量</span>
+              <strong class="detail-row-value">
+                {{ currentPreviewGenerationInfo.numImage ?? currentPreviewSet.length }}
+              </strong>
+            </div>
+            <div class="detail-row">
+              <span class="detail-row-label">当前</span>
+              <strong class="detail-row-value">{{ getCurrentPreviewIndex() }}</strong>
+            </div>
+          </section>
+
+          <section class="detail-section">
+            <h3 class="detail-section-title">提示词</h3>
+            <p class="detail-prompt-text">{{ currentPreviewPrompt || "暂无提示词" }}</p>
+
             <button
-              class="detail-upscale-button"
+              class="regenerate-primary"
               type="button"
-              :disabled="loading || !currentPreview"
-              @click="handleToolAction('super_resolution')"
+              :disabled="loading || !currentPreviewPrompt"
+              @click="
+                () => {
+                  if (currentPreviewPrompt) input = currentPreviewPrompt
+                }
+              "
             >
-              变清晰
+              再次生成
             </button>
-            <button
-              class="detail-cutout-button"
-              type="button"
-              :disabled="loading || !currentPreview"
-              @click="handleToolAction('cutout')"
-            >
-              抠图
-            </button>
-            <button class="detail-inpaint-button" type="button">局部重绘</button>
-            <button class="detail-outpaint-button" type="button">扩图</button>
-          </div>
-        </section>
 
-        <section class="detail-section">
-          <h3 class="detail-section-title">风格标签</h3>
-          <div class="tag-list">
-            <span
-              v-for="tag in detailStyleTags"
-              :key="tag"
-              class="style-tag"
-            >
-              {{ tag }}
-            </span>
-          </div>
-        </section>
-      </aside>
+            <div class="detail-action-grid">
+              <button
+                class="detail-upscale-button"
+                type="button"
+                :disabled="loading || !currentPreview"
+                @click="handleToolAction('super_resolution')"
+              >
+                变清晰
+              </button>
+              <button
+                class="detail-cutout-button"
+                type="button"
+                :disabled="loading || !currentPreview"
+                @click="handleToolAction('cutout')"
+              >
+                抠图
+              </button>
+              <button class="detail-inpaint-button" type="button">局部重绘</button>
+              <button
+                class="detail-outpaint-button"
+                type="button"
+                :disabled="loading || !currentPreview"
+                @click="openOutpaintTool"
+              >
+                扩图
+              </button>
+            </div>
+          </section>
+
+          <section class="detail-section">
+            <h3 class="detail-section-title">风格标签</h3>
+            <div class="tag-list">
+              <span
+                v-for="tag in detailStyleTags"
+                :key="tag"
+                class="style-tag"
+              >
+                {{ tag }}
+              </span>
+            </div>
+          </section>
+        </aside>
+      </template>
     </main>
   </div>
 </template>

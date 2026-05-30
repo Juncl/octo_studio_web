@@ -5,7 +5,8 @@ import type {
   GenerateImageToolResult,
   GenerationMode,
   ImageToolAction,
-  ImageSessionState
+  ImageSessionState,
+  OutpaintToolArgs
 } from "./types.js"
 import {
   createDefaultImageSession,
@@ -14,6 +15,7 @@ import {
 import {
   cutoutImageService,
   generateImageService,
+  outpaintingImageService,
   superResolutionService
 } from "../tools/generate-image-service.js"
 
@@ -246,6 +248,7 @@ export class ImageGenerationAgent {
     composerMode?: AgentComposerMode
     requestedToolAction?: ImageToolAction
     imageBase64?: string
+    outpaintParams?: OutpaintToolArgs
   }): Promise<AgentReply> {
     const state =
       (await this.deps.store.get(input.sessionId)) ??
@@ -271,7 +274,8 @@ export class ImageGenerationAgent {
     const plan = await this.planNextStep(state, input.message, {
       composerMode: input.composerMode,
       requestedToolAction: input.requestedToolAction,
-      hasImageBase64: Boolean(input.imageBase64)
+      hasImageBase64: Boolean(input.imageBase64),
+      hasOutpaintParams: Boolean(input.outpaintParams)
     })
     this.applyPlanToState(state, plan)
 
@@ -324,6 +328,22 @@ export class ImageGenerationAgent {
                 maxCreateRetries: 3,
                 createTimeoutMs: 30000
               })
+          : plan.toolAction === "outpainting"
+            ? await outpaintingImageService({
+                prompt: input.outpaintParams?.prompt ?? input.message,
+                imageBase64:
+                  input.imageBase64 ?? input.outpaintParams?.imageBase64 ?? "",
+                left: input.outpaintParams?.left ?? 0,
+                right: input.outpaintParams?.right ?? 0,
+                top: input.outpaintParams?.top ?? 0,
+                bottom: input.outpaintParams?.bottom ?? 0,
+                numImage: input.outpaintParams?.numImage ?? 1,
+                userIdx: this.deps.options.userIdx,
+                pollIntervalMs: 2000,
+                maxPollCount: 60,
+                maxCreateRetries: 3,
+                createTimeoutMs: 30000
+              })
           : await generateImageService(toolArgs as GenerateImageToolArgs)
       const images = toolResult.images ?? []
       const primaryImage = toolResult.primaryImage ?? images[0] ?? null
@@ -335,6 +355,14 @@ export class ImageGenerationAgent {
         state.lastSuccessfulPrompt = plan.finalPrompt
         state.canonicalPrompt = plan.finalPrompt
         state.currentPrompt = plan.finalPrompt
+      }
+      if (plan.toolAction === "outpainting") {
+        if (typeof input.outpaintParams?.realWidth === "number") {
+          state.width = input.outpaintParams.realWidth
+        }
+        if (typeof input.outpaintParams?.realHeight === "number") {
+          state.height = input.outpaintParams.realHeight
+        }
       }
       state.currentUserPrompt = plan.customerPrompt
 
@@ -417,6 +445,7 @@ export class ImageGenerationAgent {
       composerMode?: AgentComposerMode
       requestedToolAction?: ImageToolAction
       hasImageBase64: boolean
+      hasOutpaintParams?: boolean
     }
   ): Promise<AgentPlan> {
     const systemPrompt = this.buildPlannerSystemPrompt()
@@ -454,7 +483,8 @@ export class ImageGenerationAgent {
         {
           composerMode: requestContext.composerMode ?? "image",
           requestedToolAction: requestContext.requestedToolAction,
-          hasImageBase64: requestContext.hasImageBase64
+          hasImageBase64: requestContext.hasImageBase64,
+          hasOutpaintParams: Boolean(requestContext.hasOutpaintParams)
         },
         null,
         2
@@ -503,14 +533,17 @@ export class ImageGenerationAgent {
 - toolAction=generate_image：普通文生图或图片编辑，会由后端组装普通生图 payload。
 - toolAction=super_resolution：变清晰、高清、超分、提升分辨率，会由后端固定组装 magnify payload。
 - toolAction=cutout：抠图、去背景、移除背景，会由后端固定组装 remove_bg payload。
+- toolAction=outpainting：扩图，会由后端固定组装 outpainting payload。
 - 如果当前 UI 模式 composerMode=upscale，toolAction 必须是 super_resolution，shouldCallTool=true，requiresImage=true。
 - 如果当前 UI 模式 composerMode=cutout，toolAction 必须是 cutout，shouldCallTool=true，requiresImage=true。
+- 如果当前 UI 模式 composerMode=outpaint，toolAction 必须是 outpainting，shouldCallTool=true，requiresImage=true。
 - 如果用户说“变清晰、高清、超分、提升分辨率”，并且有当前图片，toolAction 应为 super_resolution。
 - 如果用户说“抠图、去背景、移除背景、透明背景”，并且有当前图片，toolAction 应为 cutout。
 - super_resolution 不需要 prompt，不要为它生成普通生图 payload。
 - super_resolution 的后端 payload 固定为 task_type="magnify"，args.mode="super_resolution"，args.image_base64=当前图片 base64。
 - cutout 不需要 prompt，不要为它生成普通生图 payload。
 - cutout 的后端 payload 固定为 task_type="remove_bg"，args.num_image=1，args.image_list=[{ mode:"new", image_base64:当前图片 base64 }]。
+- outpainting 使用 UI 传入的扩图距离，不要自由生成普通生图 payload。
 
 多轮图片生成规则：
 - 如果用户第二轮、第三轮说“加一个苹果”“换成蓝色”“背景改成公园”“再可爱一点”，这不是新图，而是对上一张图的增量修改。
@@ -522,7 +555,7 @@ export class ImageGenerationAgent {
 必须输出 JSON，格式如下：
 
 {
-  "toolAction": "generate_image | super_resolution | cutout | chat | prompt_only",
+  "toolAction": "generate_image | super_resolution | cutout | outpainting | chat | prompt_only",
   "intent": "new_image | edit_previous_image | refine_prompt_only | chat",
   "generationMode": "txt2img | img2img",
   "shouldCallTool": true,
@@ -558,6 +591,7 @@ export class ImageGenerationAgent {
       composerMode?: AgentComposerMode
       requestedToolAction?: ImageToolAction
       hasImageBase64: boolean
+      hasOutpaintParams?: boolean
     }
   ): AgentPlan {
     const hasPreviousImage = Boolean(state.primaryImage || state.lastImages?.[0])
@@ -602,20 +636,28 @@ export class ImageGenerationAgent {
       normalized.toolAction = "cutout"
     }
 
+    if (requestContext.composerMode === "outpaint") {
+      normalized.toolAction = "outpainting"
+    }
+
     if (
       normalized.toolAction === "super_resolution" ||
-      normalized.toolAction === "cutout"
+      normalized.toolAction === "cutout" ||
+      normalized.toolAction === "outpainting"
     ) {
       normalized.intent = "edit_previous_image"
       normalized.generationMode = "img2img"
       normalized.shouldCallTool = true
       normalized.requiresImage = true
       normalized.usePreviousImage = false
-      normalized.finalPrompt = ""
+      normalized.finalPrompt =
+        normalized.toolAction === "outpainting" ? normalized.customerPrompt : ""
       normalized.reason +=
         normalized.toolAction === "super_resolution"
           ? "；当前请求被路由到变清晰工具。"
-          : "；当前请求被路由到抠图工具。"
+          : normalized.toolAction === "cutout"
+            ? "；当前请求被路由到抠图工具。"
+            : "；当前请求被路由到扩图工具。"
 
       return normalized
     }
@@ -676,17 +718,24 @@ export class ImageGenerationAgent {
       composerMode?: AgentComposerMode
       requestedToolAction?: ImageToolAction
       hasImageBase64: boolean
+      hasOutpaintParams?: boolean
     }
   ): AgentPlan {
     if (
       requestContext.requestedToolAction === "super_resolution" ||
       requestContext.requestedToolAction === "cutout" ||
+      requestContext.requestedToolAction === "outpainting" ||
       requestContext.composerMode === "upscale" ||
-      requestContext.composerMode === "cutout"
+      requestContext.composerMode === "cutout" ||
+      requestContext.composerMode === "outpaint"
     ) {
       const toolAction =
         requestContext.requestedToolAction ??
-        (requestContext.composerMode === "cutout" ? "cutout" : "super_resolution")
+        (requestContext.composerMode === "cutout"
+          ? "cutout"
+          : requestContext.composerMode === "outpaint"
+            ? "outpainting"
+            : "super_resolution")
 
       return this.normalizePlan(
         {
@@ -695,7 +744,7 @@ export class ImageGenerationAgent {
           generationMode: "img2img",
           shouldCallTool: true,
           customerPrompt: userMessage,
-          finalPrompt: "",
+          finalPrompt: toolAction === "outpainting" ? userMessage : "",
           requiresImage: true,
           usePreviousImage: false,
           reason: "启发式规则根据 UI 模式判断为图片工具处理。"
@@ -896,7 +945,11 @@ export class ImageGenerationAgent {
   }
 
   private applyPlanToState(state: ImageSessionState, plan: AgentPlan): void {
-    if (plan.toolAction === "super_resolution" || plan.toolAction === "cutout") {
+    if (
+      plan.toolAction === "super_resolution" ||
+      plan.toolAction === "cutout" ||
+      plan.toolAction === "outpainting"
+    ) {
       state.currentUserPrompt = plan.customerPrompt
       return
     }
@@ -985,6 +1038,17 @@ export class ImageGenerationAgent {
         return [
           "已完成图片抠图。",
           `处理方式：${plan.customerPrompt || "移除背景"}`,
+          `生成数量：${imageCount}`,
+          result.primaryImage ? `主图：${result.primaryImage}` : ""
+        ]
+          .filter(Boolean)
+          .join("\n")
+      }
+
+      if (plan.toolAction === "outpainting") {
+        return [
+          "已完成图片扩图。",
+          `扩图需求：${plan.customerPrompt || "扩图"}`,
           `生成数量：${imageCount}`,
           result.primaryImage ? `主图：${result.primaryImage}` : ""
         ]

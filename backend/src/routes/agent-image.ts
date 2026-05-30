@@ -11,7 +11,8 @@ agentImageRouter.post("/", async (req, res, next) => {
       clientState,
       composerMode,
       requestedToolAction,
-      imageBase64
+      imageBase64,
+      outpaintParams
     } = req.body ?? {}
 
     if (!sessionId || typeof sessionId !== "string") {
@@ -31,7 +32,8 @@ agentImageRouter.post("/", async (req, res, next) => {
       message,
       composerMode,
       requestedToolAction,
-      imageBase64
+      imageBase64,
+      outpaintParams
     })
 
     res.json({ ok: true, ...result })

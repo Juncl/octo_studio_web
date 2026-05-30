@@ -303,6 +303,14 @@ textarea:disabled {
   background: #fff;
 }
 
+.outpaint-workspace-panel {
+  grid-column: 2 / 4;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #fff;
+}
+
 .conversation-header {
   height: 56px;
   display: flex;
