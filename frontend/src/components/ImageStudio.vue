@@ -275,6 +275,9 @@ const openComposerMenu = ref<ComposerMenu | null>(null)
 const selectedComposerModeId = ref("image")
 const defaultComposerStyleId = "qianwen"
 const defaultAspectId = "1:1"
+const workspaceToolMode = ref<WorkspaceToolMode>("preview")
+const outpaintSourceImage = ref<OutpaintSourceImage | null>(null)
+
 
 const activeConversation = computed(() => {
   return conversations.value.find((item) => item.id === activeId.value)
